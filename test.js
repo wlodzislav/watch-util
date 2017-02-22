@@ -27,7 +27,7 @@ describe("", function () {
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/a");
-		}, 0);
+		}, 100);
 	});
 
 	it("on change", function (done) {
@@ -43,7 +43,7 @@ describe("", function () {
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/b");
-		}, 0);
+		}, 100);
 	});
 
 	it("on change multiple", function (done) {
@@ -70,7 +70,7 @@ describe("", function () {
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/b2");
-		}, 0);
+		}, 100);
 	});
 
 	it("on remove", function (done) {
@@ -86,7 +86,7 @@ describe("", function () {
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.rm("temp/c");
-		}, 0);
+		}, 100);
 	});
 
 	it("cmd exec", function (done) {
@@ -101,7 +101,7 @@ describe("", function () {
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/d");
-		}, 0);
+		}, 100);
 	});
 
 	it("cmd restart", function (done) {
@@ -128,6 +128,6 @@ describe("", function () {
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/f");
-		}, 0);
+		}, 100);
 	});
 });
