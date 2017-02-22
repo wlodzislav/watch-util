@@ -4,10 +4,8 @@ var underscore = require("underscore");
 var child = require('child_process');
 //var moment = require("moment");
 
-function exec(cmd, onClose) {
+function exec(cmd) {
 	var childRunning = child.exec(cmd, {}, function (err) {});
-
-	childRunning.on("close", onClose);
 
 	childRunning.stdout.on('data', function (data) {
 		process.stdout.write(data);
@@ -30,7 +28,21 @@ function Rule(ruleOptions, watcher) {
 Rule.prototype.start = function () {
 	this._watchers = {};
 
-	var childRunning =  null;
+	this._childRunning = null;
+
+	var restart = function () {
+		this._childRunning = exec(this._ruleOptions.cmdOrFun);
+		this._childRunning.on("exit", function (code) {
+			if (code !== null) { // not killed
+				if (this.getOption("restartOnSuccess") && code === 0) {
+					restart();
+				}
+				if (this.getOption("restartOnError") && code !== 0) {
+					restart();
+				}
+			}
+		}.bind(this));
+	}.bind(this);
 
 	var firstTime = true;
 	var reglob = function () {
@@ -42,21 +54,17 @@ Rule.prototype.start = function () {
 						if (this._ruleOptions.type === "exec" && typeof(this._ruleOptions.cmdOrFun) === "function") {
 							this._ruleOptions.cmdOrFun(p, action);
 						} else {
-							child.exec(this._ruleOptions.cmdOrFun, {}, function (err) {
-							});
+							this._childRunning = child.exec(this._ruleOptions.cmdOrFun, {});
+							this._childRunning.on("exit", function () {
+								this._childRunning = null;
+							}.bind(this));
 						}
 					} else if (this._ruleOptions.type === "restart") {
-						if (childRunning) {
-							childRunning.on("close", function () {
-								childRunning = exec(this._ruleOptions.cmdOrFun, function () {
-									childRunning = null;
-								}.bind(this));
-							}.bind(this));
-							childRunning.kill();
+						if (this._childRunning) {
+							this._childRunning.on("close", restart);
+							this._childRunning.kill(this.getOption("restartSignal"));
 						} else {
-							childRunning = exec(this._ruleOptions.cmdOrFun, function () {
-								childRunning = null;
-							}.bind(this));
+							restart();
 						}
 					}
 					/*
@@ -110,9 +118,7 @@ Rule.prototype.start = function () {
 		}.bind(this));
 
 		if (firstTime && this._ruleOptions.type === "restart") {
-			childRunning = exec(this._ruleOptions.cmdOrFun, function () {
-				childRunning = null;
-			}.bind(this));
+			restart();
 		}
 		firstTime = false;
 	}.bind(this);
@@ -130,6 +136,9 @@ Rule.prototype.getOption = function (name) {
 };
 
 Rule.prototype.stop = function () {
+	if (this._childRunning) {
+		this._childRunning.kill(this.getOption("stopSignal"));
+	}
 	clearInterval(this._reglobInterval);
 	Object.keys(this._watchers).forEach(function (p) {
 		this._watchers[p].close();
@@ -150,6 +159,8 @@ Watcher.prototype._defaultOptions = {
 	queue: true, // exec calback if it's already executing
 	restartOnError: true, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
+	restartSignal: "SIGINT",
+	stopSignal: "SIGINT",
 	cwd: "path for resolving",
 	persistLog: true, // save logs in files
 	logDir: "./logs",

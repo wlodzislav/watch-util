@@ -5,6 +5,7 @@ var fs = require("fs");
 
 describe("", function () {
 	this.timeout(5000);
+	this.slow(500);
 
 	before(function () {
 		shelljs.rm("-rf", "temp");
@@ -13,6 +14,11 @@ describe("", function () {
 
 	after(function() {
 		shelljs.rm("-rf", "temp");
+	});
+
+	afterEach(function (done) {
+		// wait for watcher to close
+		setTimeout(done, 100);
 	});
 
 	it("on create", function (done) {
@@ -93,11 +99,11 @@ describe("", function () {
 		var watcher = new Watcher({ reglob: 10, debounce: 0 });
 
 		shelljs.touch("temp/d");
-		watcher.addExecRule(["temp/d"], "touch temp/e");
 		watcher.addExecRule(["temp/e"], function (fileName, action) {
 			watcher.stopAll();
 			done();
 		});
+		watcher.addExecRule(["temp/d"], "touch temp/e");
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/d");
@@ -105,10 +111,9 @@ describe("", function () {
 	});
 
 	it("cmd restart", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, restartSignal: "SIGKILL" });
 
 		shelljs.touch("temp/f");
-		watcher.addRestartRule(["temp/f"], "echo run >> temp/g; while true; do sleep 0.1; done;");
 		var changes = 0;
 		watcher.addExecRule(["temp/g"], function (fileName, action) {
 			changes++;
@@ -125,9 +130,74 @@ describe("", function () {
 				done();
 			}
 		});
+		watcher.addRestartRule(["temp/f"], "echo run >> temp/g; while true; do sleep 0.1; done;");
 		watcher.startAll();
 		setTimeout(function () {
 			shelljs.touch("temp/f");
-		}, 100);
+		}, 200);
+	});
+
+	it("cmd restart on error", function (done) {
+		var watcher = new Watcher({ reglob: 10, debounce: 0, stopSignal: "SIGKILL" });
+
+		var changes = 0;
+		watcher.addExecRule(["temp/g2"], function (fileName, action) {
+			changes++;
+
+			if (changes >= 5) {
+				watcher.stopAll();
+				done();
+			}
+		});
+		watcher.addRestartRule(["temp/f2"], { restartOnError: true }, "echo run >> temp/g2; exit 1;");
+		watcher.startAll();
+	});
+
+	it("cmd don't restart on error", function (done) {
+		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+
+		var changes = 0;
+		watcher.addExecRule(["temp/g3"], function (fileName, action) {
+			changes++;
+		});
+		watcher.addRestartRule(["temp/f3"], { restartOnError: false }, "echo run >> temp/g3; exit 1;");
+		setTimeout(function () {
+			assert.equal(changes, 1);
+			watcher.stopAll();
+			done();
+		}, 300);
+		watcher.startAll();
+	});
+	
+	it("cmd restart on success", function (done) {
+		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+
+		var changes = 0;
+		watcher.addExecRule(["temp/g4"], function (fileName, action) {
+			changes++;
+
+			if (changes >= 5) {
+				watcher.stopAll();
+				done();
+			}
+		});
+		watcher.addRestartRule(["temp/f4"], { restartOnSuccess: true }, "echo run >> temp/g4; exit 0;");
+		watcher.startAll();
+	});
+
+	it("cmd don't restart on success", function (done) {
+		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+
+		var changes = 0;
+		watcher.addExecRule(["temp/g5"], function (fileName, action) {
+			changes++;
+		});
+		watcher.addRestartRule(["temp/f5"], { restartOnSuccess: false }, "echo run >> temp/g5; exit 0;");
+		setTimeout(function () {
+			assert.equal(changes, 1);
+			watcher.stopAll();
+			done();
+		}, 300);
+		watcher.startAll();
 	});
 });
