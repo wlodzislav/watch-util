@@ -47,11 +47,14 @@ Rule.prototype.start = function () {
 						}
 					} else if (this._ruleOptions.type === "restart") {
 						if (childRunning) {
-							exec(this._ruleOptions.cmdOrFun, function () {
-								childRunning = exec(this._ruleOptions.cmdOrFun, function () {});
+							childRunning.on("close", function () {
+								childRunning = exec(this._ruleOptions.cmdOrFun, function () {
+									childRunning = null;
+								}.bind(this));
 							}.bind(this));
+							childRunning.kill();
 						} else {
-							exec(this._ruleOptions.cmdOrFun, function () {
+							childRunning = exec(this._ruleOptions.cmdOrFun, function () {
 								childRunning = null;
 							}.bind(this));
 						}
@@ -107,7 +110,7 @@ Rule.prototype.start = function () {
 		}.bind(this));
 
 		if (firstTime && this._ruleOptions.type === "restart") {
-			exec(this._ruleOptions.cmdOrFun, function () {
+			childRunning = exec(this._ruleOptions.cmdOrFun, function () {
 				childRunning = null;
 			}.bind(this));
 		}
