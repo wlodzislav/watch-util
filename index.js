@@ -138,8 +138,10 @@ Rule.prototype.getOption = function (name) {
 Rule.prototype.stop = function () {
 	if (this._childRunning) {
 		this._childRunning.kill(this.getOption("stopSignal"));
+		this._childRunning = null;
 	}
 	clearInterval(this._reglobInterval);
+	this._reglobInterval = null;
 	Object.keys(this._watchers).forEach(function (p) {
 		this._watchers[p].close();
 		delete this._watchers[p];
