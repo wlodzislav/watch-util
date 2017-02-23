@@ -5,7 +5,7 @@ var child = require('child_process');
 //var moment = require("moment");
 
 function exec(cmd, options) {
-	var childRunning = child.spawn('sh', ['-c', cmd], {});
+	var childRunning = child.spawn(cmd, { shell: true });
 
 	if (options.writeToConsole) {
 		childRunning.stdout.on('data', function (data) {
