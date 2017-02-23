@@ -22,7 +22,7 @@ describe("", function () {
 	});
 
 	it("on create", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, mtimeCheck: false });
 
 		watcher.addExecRule(["temp/a"], function (fileName, action) {
 			assert.equal(fileName, "temp/a");
@@ -37,7 +37,7 @@ describe("", function () {
 	});
 
 	it("on change", function (done) {
-		var watcher = new Watcher({ debounce: 0 });
+		var watcher = new Watcher({ debounce: 0, mtimeCheck: false });
 
 		shelljs.touch("temp/b");
 		watcher.addExecRule(["temp/b"], function (fileName, action) {
@@ -53,7 +53,7 @@ describe("", function () {
 	});
 
 	it("on change multiple", function (done) {
-		var watcher = new Watcher({ debounce: 0 });
+		var watcher = new Watcher({ debounce: 0, mtimeCheck: false });
 
 		shelljs.touch("temp/b2");
 		var changes = 0;
@@ -80,7 +80,7 @@ describe("", function () {
 	});
 
 	it("on remove", function (done) {
-		var watcher = new Watcher({ debounce: 0 });
+		var watcher = new Watcher({ debounce: 0, mtimeCheck: false });
 
 		shelljs.touch("temp/c");
 		watcher.addExecRule(["temp/c"], function (fileName, action) {
@@ -96,7 +96,7 @@ describe("", function () {
 	});
 
 	it("cmd exec", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, mtimeCheck: false });
 
 		shelljs.touch("temp/d");
 		watcher.addExecRule(["temp/e"], function (fileName, action) {
@@ -111,7 +111,7 @@ describe("", function () {
 	});
 
 	it("cmd restart", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0, restartSignal: "SIGKILL" });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, restartSignal: "SIGKILL", mtimeCheck: false });
 
 		shelljs.touch("temp/f");
 		var changes = 0;
@@ -138,7 +138,7 @@ describe("", function () {
 	});
 
 	it("cmd restart on error", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0, stopSignal: "SIGKILL" });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, stopSignal: "SIGKILL", mtimeCheck: false });
 
 		var changes = 0;
 		watcher.addExecRule(["temp/g2"], function (fileName, action) {
@@ -154,7 +154,7 @@ describe("", function () {
 	});
 
 	it("cmd don't restart on error", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, mtimeCheck: false });
 
 		var changes = 0;
 		watcher.addExecRule(["temp/g3"], function (fileName, action) {
@@ -170,7 +170,7 @@ describe("", function () {
 	});
 	
 	it("cmd restart on success", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, mtimeCheck: false });
 
 		var changes = 0;
 		watcher.addExecRule(["temp/g4"], function (fileName, action) {
@@ -186,7 +186,7 @@ describe("", function () {
 	});
 
 	it("cmd don't restart on success", function (done) {
-		var watcher = new Watcher({ reglob: 10, debounce: 0 });
+		var watcher = new Watcher({ reglob: 10, debounce: 0, mtimeCheck: false });
 
 		var changes = 0;
 		watcher.addExecRule(["temp/g5"], function (fileName, action) {

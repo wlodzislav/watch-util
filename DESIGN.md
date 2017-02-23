@@ -135,6 +135,19 @@ rule.log.dump(path)
 // Serialize rule
 rule.toJSON()
 
+CLI API
+=======
+
+supervisor
+
+	-r --restart
+	-e --exec
+	-g --glob ""
+	-d --debounce ""
+	-G --reglob ""
+	-E --no-/--restart-on-error
+	-S --no-/--restart-on-success
+
 REST API
 ========
 

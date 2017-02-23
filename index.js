@@ -2,22 +2,38 @@ var fs = require("fs");
 var globby = require("globby");
 var underscore = require("underscore");
 var child = require('child_process');
-//var moment = require("moment");
+var moment = require("moment");
+var clc = require('cli-color');
+
+debugLog = function () {
+	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
+}
 
 function exec(cmd, options) {
-	var childRunning = child.spawn(cmd, { shell: true });
-
 	if (options.writeToConsole) {
-		childRunning.stdout.on('data', function (data) {
-			process.stdout.write(data);
-		});
-
-		childRunning.stderr.on('data', function (data) {
-			process.stderr.write(data);
-		});
+		var childRunning = child.spawn(cmd, { shell: true, stdio: "inherit" });
+	} else {
+		var childRunning = child.spawn(cmd, { shell: true });
 	}
 
 	return childRunning;
+}
+
+function preprocessGlobPatters(patterns) {
+	if (!Array.isArray(patterns)) {
+		patterns = patterns.split(",");
+	}
+	var additional = [];
+	patterns.forEach(function (p) {
+		if (p.startsWith("!") && !p.endsWith("**/*")) {
+			if (p.endsWith("/")) {
+				additional.push(p+"**/*");
+			} else {
+				additional.push(p+"/**/*");
+			}
+		}
+	});
+	return patterns.concat(additional);
 }
 
 function Rule(ruleOptions, watcher) {
@@ -27,6 +43,7 @@ function Rule(ruleOptions, watcher) {
 	this._watcher = watcher;
 }
 
+var gid = 0;
 Rule.prototype.start = function () {
 	this._watchers = {};
 
@@ -48,12 +65,12 @@ Rule.prototype.start = function () {
 
 	var firstTime = true;
 	var reglob = function () {
-		var paths = globby.sync(this._ruleOptions.globPatterns);
+		var paths = globby.sync(preprocessGlobPatters(this._ruleOptions.globPatterns));
 		paths.forEach(function (p) {
 			if (!this._watchers[p]) {
 				var execCallback = underscore.debounce(function (action) {
 					if (this._ruleOptions.type === "exec") {
-						if (this._ruleOptions.type === "exec" && typeof(this._ruleOptions.cmdOrFun) === "function") {
+						if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 							this._ruleOptions.cmdOrFun(p, action);
 						} else {
 							this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
@@ -71,13 +88,15 @@ Rule.prototype.start = function () {
 					}
 					/*
 					if (callback.name) {
-						console.log(moment().format("hh:mm:ss: ") + callback.name + "(\"" + p + "\");");
 					}
 					*/
 				}.bind(this), this.getOption("debounce"));
 
 				var rewatch = function () {
 					if (this._watchers[p]) {
+						if (this.getOption("debug")) {
+							debugLog(clc.red("Deleted")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id);
+						}
 						this._watchers[p].close();
 					} else {
 					}
@@ -88,6 +107,9 @@ Rule.prototype.start = function () {
 						return setTimeout(reglob, 0);
 					}
 					this._watchers[p] = fs.watch(p, function (action) {
+						if (this.getOption("debug")) {
+							debugLog(clc.green("Fire")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id+" action="+action);
+						}
 						try {
 							stat = fs.statSync(p);
 						} catch (err) {
@@ -96,12 +118,22 @@ Rule.prototype.start = function () {
 							}
 						}
 						if (action == "rename") {
-							rewatch();
+							setTimeout(rewatch, 0);
 						}
 
-						execCallback(action);
-						mtime = stat.time;
-					});
+						if (this.getOption("mtimeCheck")) {
+							if (stat.mtime > mtime) {
+								execCallback();
+								mtime = stat.time;
+							}
+						} else {
+							execCallback(action);
+						}
+					}.bind(this));
+					if (this.getOption("debug")) {
+						this._watchers[p].id = (++gid);
+						debugLog(clc.green("Created")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id);
+					}
 				}.bind(this);
 
 				rewatch();
@@ -114,6 +146,9 @@ Rule.prototype.start = function () {
 
 		Object.keys(this._watchers).forEach(function (p) {
 			if (paths.indexOf(p) == -1) {
+				if (this.getOption("debug")) {
+					debugLog(clc.red("Deleted")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id);
+				}
 				this._watchers[p].close();
 				delete this._watchers[p];
 			}
@@ -158,8 +193,8 @@ function Watcher(globalOptions) {
 }
 
 Watcher.prototype._defaultOptions = {
-	debounce: 200, // exec/reload once in ms at max
-	reglob: 1000, // perform reglob to watch added files
+	debounce: 500, // exec/reload once in ms at max
+	reglob: 2000, // perform reglob to watch added files
 	//queue: true, // exec calback if it's already executing
 	restartOnError: true, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
@@ -169,7 +204,9 @@ Watcher.prototype._defaultOptions = {
 	//persistLog: true, // save logs in files
 	//logDir: "./logs",
 	//logRotation: "5h", // s,m,h,d,M
-	writeToConsole: true // write logs to console
+	writeToConsole: true, // write logs to console
+	mtimeCheck: true,
+	debug: false
 };
 
 Watcher.prototype.addExecRule = function (globPatterns, ruleOptions, cmdOrFun) {
