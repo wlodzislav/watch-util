@@ -5,7 +5,7 @@ var child = require('child_process');
 //var moment = require("moment");
 
 function exec(cmd) {
-	var childRunning = child.exec(cmd, {}, function (err) {});
+	var childRunning = child.spawn('sh', ['-c', cmd], {});
 
 	childRunning.stdout.on('data', function (data) {
 		process.stdout.write(data);
@@ -54,7 +54,7 @@ Rule.prototype.start = function () {
 						if (this._ruleOptions.type === "exec" && typeof(this._ruleOptions.cmdOrFun) === "function") {
 							this._ruleOptions.cmdOrFun(p, action);
 						} else {
-							this._childRunning = child.exec(this._ruleOptions.cmdOrFun, {});
+							this._childRunning = exec(this._ruleOptions.cmdOrFun);
 							this._childRunning.on("exit", function () {
 								this._childRunning = null;
 							}.bind(this));
@@ -158,16 +158,16 @@ function Watcher(globalOptions) {
 Watcher.prototype._defaultOptions = {
 	debounce: 200, // exec/reload once in ms at max
 	reglob: 1000, // perform reglob to watch added files
-	queue: true, // exec calback if it's already executing
+	//queue: true, // exec calback if it's already executing
 	restartOnError: true, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
-	restartSignal: "SIGINT",
-	stopSignal: "SIGINT",
-	cwd: "path for resolving",
-	persistLog: true, // save logs in files
-	logDir: "./logs",
-	logRotation: "5h", // s,m,h,d,M
-	writeToConsole: true // write logs to console
+	restartSignal: "SIGTERM",
+	stopSignal: "SIGTERM",
+	//cwd: "path for resolving",
+	//persistLog: true, // save logs in files
+	//logDir: "./logs",
+	//logRotation: "5h", // s,m,h,d,M
+	//writeToConsole: true // write logs to console
 };
 
 Watcher.prototype.addExecRule = function (globPatterns, ruleOptions, cmdOrFun) {

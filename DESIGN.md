@@ -1,6 +1,14 @@
 Utility for running, restarting and log viewing of multiple commands per project
 ================================================================================
 
+Plan
+====
+- lib exec/restart
+- cmd
+- gui
+- REST
+- persistent logs
+
 Features
 ========
 
