@@ -4,16 +4,18 @@ var underscore = require("underscore");
 var child = require('child_process');
 //var moment = require("moment");
 
-function exec(cmd) {
+function exec(cmd, options) {
 	var childRunning = child.spawn('sh', ['-c', cmd], {});
 
-	childRunning.stdout.on('data', function (data) {
-		process.stdout.write(data);
-	});
+	if (options.writeToConsole) {
+		childRunning.stdout.on('data', function (data) {
+			process.stdout.write(data);
+		});
 
-	childRunning.stderr.on('data', function (data) {
-		process.stderr.write(data);
-	});
+		childRunning.stderr.on('data', function (data) {
+			process.stderr.write(data);
+		});
+	}
 
 	return childRunning;
 }
@@ -31,7 +33,7 @@ Rule.prototype.start = function () {
 	this._childRunning = null;
 
 	var restart = function () {
-		this._childRunning = exec(this._ruleOptions.cmdOrFun);
+		this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
 		this._childRunning.on("exit", function (code) {
 			if (code !== null) { // not killed
 				if (this.getOption("restartOnSuccess") && code === 0) {
@@ -54,7 +56,7 @@ Rule.prototype.start = function () {
 						if (this._ruleOptions.type === "exec" && typeof(this._ruleOptions.cmdOrFun) === "function") {
 							this._ruleOptions.cmdOrFun(p, action);
 						} else {
-							this._childRunning = exec(this._ruleOptions.cmdOrFun);
+							this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
 							this._childRunning.on("exit", function () {
 								this._childRunning = null;
 							}.bind(this));
@@ -167,7 +169,7 @@ Watcher.prototype._defaultOptions = {
 	//persistLog: true, // save logs in files
 	//logDir: "./logs",
 	//logRotation: "5h", // s,m,h,d,M
-	//writeToConsole: true // write logs to console
+	writeToConsole: true // write logs to console
 };
 
 Watcher.prototype.addExecRule = function (globPatterns, ruleOptions, cmdOrFun) {
