@@ -3,7 +3,7 @@ var globby = require("globby");
 var underscore = require("underscore");
 var child = require('child_process');
 var moment = require("moment");
-var clc = require('cli-color');
+var chalk = require("chalk");
 
 debugLog = function () {
 	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
@@ -48,7 +48,6 @@ Rule.prototype.start = function () {
 	this._watchers = {};
 
 	this._childRunning = null;
-
 	var restart = function () {
 		this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
 		this._childRunning.on("exit", function (code) {
@@ -95,7 +94,7 @@ Rule.prototype.start = function () {
 				var rewatch = function () {
 					if (this._watchers[p]) {
 						if (this.getOption("debug")) {
-							debugLog(clc.red("Deleted")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id);
+							debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
 						}
 						this._watchers[p].close();
 					} else {
@@ -108,7 +107,7 @@ Rule.prototype.start = function () {
 					}
 					this._watchers[p] = fs.watch(p, function (action) {
 						if (this.getOption("debug")) {
-							debugLog(clc.green("Fire")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id+" action="+action);
+							debugLog(chalk.green("Fire")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id+" action="+action);
 						}
 						try {
 							stat = fs.statSync(p);
@@ -132,7 +131,7 @@ Rule.prototype.start = function () {
 					}.bind(this));
 					if (this.getOption("debug")) {
 						this._watchers[p].id = (++gid);
-						debugLog(clc.green("Created")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id);
+						debugLog(chalk.green("Created")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
 					}
 				}.bind(this);
 
@@ -147,7 +146,7 @@ Rule.prototype.start = function () {
 		Object.keys(this._watchers).forEach(function (p) {
 			if (paths.indexOf(p) == -1) {
 				if (this.getOption("debug")) {
-					debugLog(clc.red("Deleted")+" watcher: path="+clc.yellow(p)+" id="+this._watchers[p].id);
+					debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
 				}
 				this._watchers[p].close();
 				delete this._watchers[p];
@@ -162,6 +161,7 @@ Rule.prototype.start = function () {
 
 	reglob();
 
+	this._started = true;
 	this._reglobInterval = setInterval(reglob, this.getOption("reglob"));
 	return this;
 };
@@ -173,23 +173,57 @@ Rule.prototype.getOption = function (name) {
 };
 
 Rule.prototype.stop = function () {
-	if (this._childRunning) {
-		this._childRunning.kill(this.getOption("stopSignal"));
-		this._childRunning = null;
+	if (this._started) {
+		if (this._childRunning) {
+			this._childRunning.kill(this.getOption("stopSignal"));
+			this._childRunning = null;
+		}
+		clearInterval(this._reglobInterval);
+		this._reglobInterval = null;
+		Object.keys(this._watchers).forEach(function (p) {
+			this._watchers[p].close();
+			delete this._watchers[p];
+		}.bind(this));
+		this._started = false;
 	}
-	clearInterval(this._reglobInterval);
-	this._reglobInterval = null;
-	Object.keys(this._watchers).forEach(function (p) {
-		this._watchers[p].close();
-		delete this._watchers[p];
-	}.bind(this));
 };
+
+Rule.prototype.restart = function () {
+	this.stop();
+	this.start();
+};
+
+Rule.prototype.toJSON = function () {
+	var ruleOptionsCopy = JSON.parse(JSON.stringify(this._ruleOptions));
+	if (typeof(this._ruleOptions.cmdOrFun) === "function") {
+		ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
+	}
+	ruleOptionsCopy.started = this._started;
+	return ruleOptionsCopy;
+};
+
+Rule.prototype.delete = function () {
+	this.stop();
+	var index = this._watcher._rules.indexOf(this);
+	this._watcher._rules.splice(index, 1);
+	if (this.getOption("debug")) {
+		debugLog(chalk.green("Delete rule"), "index="+index);
+	}
+};
+
+function rulesToJSON() {
+	return this.map(function (r) {
+		return r.toJSON();
+	});
+}
 
 function Watcher(globalOptions) {
 	if (!(this instanceof Watcher)) { return new Watcher(globalOptions); }
 
 	this._globalOptions = globalOptions || {};
 	this._rules = [];
+
+	this._rules.toJSON = rulesToJSON;
 }
 
 Watcher.prototype._defaultOptions = {
@@ -209,17 +243,28 @@ Watcher.prototype._defaultOptions = {
 	debug: false
 };
 
+Watcher.prototype.getOption = function (name) {
+	return [this._globalOptions[name], this._defaultOptions[name]].find(function (value) {
+		return value != null;
+	});
+};
+
 Watcher.prototype.addExecRule = function (globPatterns, ruleOptions, cmdOrFun) {
 	if (arguments.length === 2) {
 		cmdOrFun = ruleOptions;
 		ruleOptions = {};
 	}
 
+	if (this.getOption("debug")) {
+		debugLog(chalk.green(".addExecRule")+"("+JSON.stringify(globPatterns)+", "+JSON.stringify(ruleOptions)+", "+((typeof(cmdOrFun) === "string") ? JSON.stringify(cmdOrFun) : "<FUNCTION>")+")");
+	}
 	ruleOptions.globPatterns = globPatterns;
 	ruleOptions.type = "exec";
 	ruleOptions.cmdOrFun = cmdOrFun;
 
-	this._rules.push(new Rule(ruleOptions, this));
+	var rule = new Rule(ruleOptions, this);
+	this._rules.push(rule);
+	return rule;
 };
 
 Watcher.prototype.addRestartRule = function (globPatterns, ruleOptions, cmd) {
@@ -228,11 +273,37 @@ Watcher.prototype.addRestartRule = function (globPatterns, ruleOptions, cmd) {
 		ruleOptions = {};
 	}
 
+	if (this.getOption("debug")) {
+		debugLog(chalk.green(".addRestartRule")+"("+JSON.stringify(globPatterns)+", "+JSON.stringify(ruleOptions)+", "+((typeof(cmdOrFun) === "string") ? JSON.stringify(cmd) : "<FUNCTION>")+")");
+	}
 	ruleOptions.globPatterns = globPatterns;
 	ruleOptions.type = "restart";
 	ruleOptions.cmdOrFun = cmd;
 
-	this._rules.push(new Rule(ruleOptions, this));
+	var rule = new Rule(ruleOptions, this);
+	this._rules.push(rule);
+	return rule;
+};
+
+Watcher.prototype.addRule = function (ruleOptions) {
+	if (this.getOption("debug")) {
+		if (typeof(ruleOptions.cmdOrFun) === "function") {
+			var ruleOptionsCopy = JSON.parse(JSON.stringify(ruleOptions));
+			ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
+		}
+		debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
+	}
+	var rule = new Rule(ruleOptions, this);
+	this._rules.push(rule);
+	return rule;
+};
+
+Watcher.prototype.rules = function () {
+	return this._rules;
+};
+
+Watcher.prototype.getRuleByIndex = function (index) {
+	return this._rules[index];
 };
 
 Watcher.prototype.startAll = function () {
