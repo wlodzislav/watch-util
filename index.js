@@ -43,8 +43,10 @@ function Rule(ruleOptions, watcher) {
 	this._watcher = watcher;
 }
 
-var gid = 0;
 Rule.prototype.start = function () {
+	if (this._started) {
+		throw new Error("Process already started");
+	}
 	this._watchers = {};
 
 	this._childRunning = null;
@@ -130,7 +132,7 @@ Rule.prototype.start = function () {
 						}
 					}.bind(this));
 					if (this.getOption("debug")) {
-						this._watchers[p].id = (++gid);
+						this._watchers[p].id = this._watcher.watcherId();
 						debugLog(chalk.green("Created")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
 					}
 				}.bind(this);
@@ -199,6 +201,7 @@ Rule.prototype.toJSON = function () {
 		ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
 	}
 	ruleOptionsCopy.started = this._started;
+	ruleOptionsCopy.id = this.id;
 	return ruleOptionsCopy;
 };
 
@@ -224,6 +227,8 @@ function Watcher(globalOptions) {
 	this._rules = [];
 
 	this._rules.toJSON = rulesToJSON;
+	this._ruleId = 0;
+	this._watcherId = 0;
 }
 
 Watcher.prototype._defaultOptions = {
@@ -243,6 +248,14 @@ Watcher.prototype._defaultOptions = {
 	debug: false
 };
 
+Watcher.prototype.ruleId = function () {
+	return this._ruleId++;
+}
+
+Watcher.prototype.watcherId = function () {
+	return this._watcherId++;
+}
+
 Watcher.prototype.getOption = function (name) {
 	return [this._globalOptions[name], this._defaultOptions[name]].find(function (value) {
 		return value != null;
@@ -255,16 +268,11 @@ Watcher.prototype.addExecRule = function (globPatterns, ruleOptions, cmdOrFun) {
 		ruleOptions = {};
 	}
 
-	if (this.getOption("debug")) {
-		debugLog(chalk.green(".addExecRule")+"("+JSON.stringify(globPatterns)+", "+JSON.stringify(ruleOptions)+", "+((typeof(cmdOrFun) === "string") ? JSON.stringify(cmdOrFun) : "<FUNCTION>")+")");
-	}
 	ruleOptions.globPatterns = globPatterns;
 	ruleOptions.type = "exec";
 	ruleOptions.cmdOrFun = cmdOrFun;
 
-	var rule = new Rule(ruleOptions, this);
-	this._rules.push(rule);
-	return rule;
+	return this.addRule(ruleOptions);
 };
 
 Watcher.prototype.addRestartRule = function (globPatterns, ruleOptions, cmd) {
@@ -273,16 +281,11 @@ Watcher.prototype.addRestartRule = function (globPatterns, ruleOptions, cmd) {
 		ruleOptions = {};
 	}
 
-	if (this.getOption("debug")) {
-		debugLog(chalk.green(".addRestartRule")+"("+JSON.stringify(globPatterns)+", "+JSON.stringify(ruleOptions)+", "+((typeof(cmdOrFun) === "string") ? JSON.stringify(cmd) : "<FUNCTION>")+")");
-	}
 	ruleOptions.globPatterns = globPatterns;
 	ruleOptions.type = "restart";
 	ruleOptions.cmdOrFun = cmd;
 
-	var rule = new Rule(ruleOptions, this);
-	this._rules.push(rule);
-	return rule;
+	return this.addRule(ruleOptions);
 };
 
 Watcher.prototype.addRule = function (ruleOptions) {
@@ -294,6 +297,7 @@ Watcher.prototype.addRule = function (ruleOptions) {
 		debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
 	}
 	var rule = new Rule(ruleOptions, this);
+	rule.id = this.ruleId();
 	this._rules.push(rule);
 	return rule;
 };
@@ -302,8 +306,50 @@ Watcher.prototype.rules = function () {
 	return this._rules;
 };
 
+Watcher.prototype.getRuleById = function (id) {
+	return this._rules.find(function (rule) {
+		return rule.id === id;
+	});
+};
+
 Watcher.prototype.getRuleByIndex = function (index) {
 	return this._rules[index];
+};
+
+Watcher.prototype.startById = function (id) {
+	var rule = this.getRuleById(id);
+	if (!rule) {
+		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't start rule with id=" + id + ", there is no such rule" }
+	}
+
+	rule.start();
+};
+
+Watcher.prototype.restartById = function (id) {
+	var rule = this.getRuleById(id);
+	if (!rule) {
+		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't restart rule with id=" + id + ", there is no such rule" }
+	}
+
+	rule.restart();
+};
+
+Watcher.prototype.stopById = function (id) {
+	var rule = this.getRuleById(id);
+	if (!rule) {
+		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't stop rule with id=" + id + ", there is no such rule" }
+	}
+
+	rule.stop();
+};
+
+Watcher.prototype.deleteById = function (id) {
+	var rule = this.getRuleById(id);
+	if (!rule) {
+		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't delete rule with id=" + id + ", there is no such rule" }
+	}
+
+	rule.delete();
 };
 
 Watcher.prototype.startAll = function () {
