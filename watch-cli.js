@@ -2,7 +2,7 @@ var program = require('commander');
 var Watcher = require("./index");
 
 program
-	.usage("[options] <shell cmd>\n\n    Util for restarting/execution  shell commands on files changes")
+	.usage("[options] -- <shell cmd>\n\n    Util for restarting/execution  shell commands on files changes")
 	.option("-e --exec", "Execute comand on changes, not reload")
 	.option("-g --glob <patterns>", "Patterns to watch, separated by comma, ignore pattern starts with '!', for exact pattern syntax see: https://github.com/isaacs/node-glob")
 	.option("-d --debounce <ms>", "Debounce exec/reload by ms, used for editors like vim that mv then rm files for crash safety")
