@@ -125,7 +125,7 @@ Rule.prototype.start = function () {
 						if (this.getOption("mtimeCheck")) {
 							if (stat.mtime > mtime) {
 								execCallback();
-								mtime = stat.time;
+								mtime = stat.mtime;
 							}
 						} else {
 							execCallback(action);
