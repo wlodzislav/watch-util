@@ -231,6 +231,8 @@ function Watcher(globalOptions) {
 	this._watcherId = 0;
 }
 
+Watcher.prototype.Rule = Rule;
+
 Watcher.prototype._defaultOptions = {
 	debounce: 500, // exec/reload once in ms at max
 	reglob: 2000, // perform reglob to watch added files
@@ -289,15 +291,22 @@ Watcher.prototype.addRestartRule = function (globPatterns, ruleOptions, cmd) {
 };
 
 Watcher.prototype.addRule = function (ruleOptions) {
-	if (this.getOption("debug")) {
-		if (typeof(ruleOptions.cmdOrFun) === "function") {
-			var ruleOptionsCopy = JSON.parse(JSON.stringify(ruleOptions));
-			ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
+	var rule;
+	if(ruleOptions instanceof Rule){
+		rule = ruleOptions;
+		rule._watcher = this;
+	}else{
+		if (this.getOption("debug")) {
+			if (typeof(ruleOptions.cmdOrFun) === "function") {
+				var ruleOptionsCopy = JSON.parse(JSON.stringify(ruleOptions));
+				ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
+			}
+			debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
 		}
-		debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
+		rule = new Rule(ruleOptions, this);
+		rule.id = this.ruleId();
 	}
-	var rule = new Rule(ruleOptions, this);
-	rule.id = this.ruleId();
+
 	this._rules.push(rule);
 	return rule;
 };
