@@ -137,6 +137,33 @@ describe("", function () {
 		}, 200);
 	});
 
+	it("cmd restart, exiting cmd", function (done) {
+		var watcher = new Watcher({ reglob: 10, debounce: 0, restartSignal: "SIGKILL", mtimeCheck: false });
+
+		shelljs.touch("temp/f");
+		var changes = 0;
+		watcher.addExecRule(["temp/g"], function (fileName, action) {
+			changes++;
+
+			if (changes === 1) {
+				setTimeout(function () {
+					shelljs.touch("temp/f");
+				}, 0);
+			}
+			if (changes >= 3) {
+				var content = fs.readFileSync("temp/g", "utf8");
+				assert.equal(content, "run\nrun\nrun\nrun\nrun\nrun\n");
+				watcher.stopAll();
+				done();
+			}
+		});
+		watcher.addRestartRule(["temp/f"], "echo run >> temp/g; sleep 0.1");
+		watcher.startAll();
+		setTimeout(function () {
+			shelljs.touch("temp/f");
+		}, 200);
+	});
+
 	it("cmd restart on error", function (done) {
 		var watcher = new Watcher({ reglob: 10, debounce: 0, stopSignal: "SIGKILL", mtimeCheck: false });
 

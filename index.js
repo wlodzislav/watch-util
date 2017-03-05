@@ -53,6 +53,7 @@ Rule.prototype.start = function () {
 	var restart = function () {
 		this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
 		this._childRunning.on("exit", function (code) {
+			this._childRunning = null;
 			if (code !== null) { // not killed
 				if (this.getOption("restartOnSuccess") && code === 0) {
 					restart();
