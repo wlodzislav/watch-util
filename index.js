@@ -4,6 +4,7 @@ var underscore = require("underscore");
 var child = require('child_process');
 var moment = require("moment");
 var chalk = require("chalk");
+var terminate = require('terminate');
 
 debugLog = function () {
 	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
@@ -51,6 +52,16 @@ Rule.prototype.start = function () {
 
 	this._childRunning = null;
 	var restart = function () {
+		if (this._childRunning) {
+			if (this.getOption("debug")) {
+				debugLog(chalk.green("Kill"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+			}
+			terminate(this._childRunning.pid, restart);
+			return;
+		}
+		if (this.getOption("debug")) {
+			debugLog(chalk.green("Restart"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+		}
 		this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
 		this._childRunning.on("exit", function (code) {
 			this._childRunning = null;
@@ -81,17 +92,8 @@ Rule.prototype.start = function () {
 							}.bind(this));
 						}
 					} else if (this._ruleOptions.type === "restart") {
-						if (this._childRunning) {
-							this._childRunning.on("close", restart);
-							this._childRunning.kill(this.getOption("restartSignal"));
-						} else {
-							restart();
-						}
+						restart();
 					}
-					/*
-					if (callback.name) {
-					}
-					*/
 				}.bind(this), this.getOption("debounce"));
 
 				var rewatch = function () {
@@ -178,7 +180,7 @@ Rule.prototype.getOption = function (name) {
 Rule.prototype.stop = function () {
 	if (this._started) {
 		if (this._childRunning) {
-			this._childRunning.kill(this.getOption("stopSignal"));
+			terminate(this._childRunning.pid, restart);
 			this._childRunning = null;
 		}
 		clearInterval(this._reglobInterval);
@@ -240,8 +242,6 @@ Watcher.prototype._defaultOptions = {
 	//queue: true, // exec calback if it's already executing
 	restartOnError: true, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
-	restartSignal: "SIGTERM",
-	stopSignal: "SIGTERM",
 	//cwd: "path for resolving",
 	//persistLog: true, // save logs in files
 	//logDir: "./logs",
