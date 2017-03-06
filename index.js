@@ -94,14 +94,16 @@ Rule.prototype.start = function () {
 			debug: this.getOption("debug")
 		});
 		this._childRunning.on("exit", function (code) {
-			this._childRunning = null;
-			if (code !== null) { // not killed
+			if (!this._childRunning.killed) { // not killed
+				this._childRunning = null;
 				if (this.getOption("restartOnSuccess") && code === 0) {
 					restart();
 				}
 				if (this.getOption("restartOnError") && code !== 0) {
 					restart();
 				}
+			} else {
+				this._childRunning = null;
 			}
 		}.bind(this));
 	}.bind(this);
