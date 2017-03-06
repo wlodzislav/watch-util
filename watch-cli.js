@@ -9,12 +9,14 @@ program
 	.option("-G --reglob <ms>", "Reglob interval to track new added files, on ms")
 	.option("--no-restart-on-error", "Don't restart cmd if cmd crashes or exited with non 0 status")
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
+	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
 	.option("--debug", "Print debug info");
 
 program.on('--help', function(){
   console.log('  Examples:\n');
-  console.log('    $ cli.js -e -g \'**/*.js,!node_modules\' mocha');
-  console.log('    $ cli.js -g \'**/*.js,!node_modules\' node server.js');
+  console.log('    $ watch-cli.js -e -g \'**/*.js,!node_modules\' mocha');
+  console.log('    $ watch-cli.js -g \'**/*.js,!node_modules\' node server.js');
+  console.log('    $ watch-cli.js -g \'*.js\' -s \'node -e\' \'console.log("wtf")\'');
 });
 
 program.parse(process.argv);

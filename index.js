@@ -10,11 +10,37 @@ debugLog = function () {
 	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
 }
 
+var isShAvailableOnWin = undefined;
+function checkShAvailableOnWin() {
+	try {
+		var stat = fs.statSync("/bin/sh.exe");
+	} catch (err) {
+		return false;
+	}
+	return true;
+}
+
 function exec(cmd, options) {
-	if (options.writeToConsole) {
-		var childRunning = child.spawn(cmd, { shell: true, stdio: "inherit" });
-	} else {
-		var childRunning = child.spawn(cmd, { shell: true });
+	if (options.shell === true) {
+		if (process.platform === 'win32') {
+			if (isShAvailableOnWin === undefined) {
+				isShAvailableOnWin = checkShAvailableOnWin();
+				if (isShAvailableOnWin && options.debug) {
+					debugLog("Will use " + chalk.yellow("'C:\\\\bin\\\\sh.exe'") + " as default shell.");
+				}
+			}
+
+			if (isShAvailableOnWin) {
+				var childRunning = child.spawn("/bin/sh", ["-c", cmd], { stdio: options.writeToConsole ? "inherit" : null });
+			} else {
+				var childRunning = child.spawn(cmd, { shell: true, stdio: options.writeToConsole ? "inherit" : null });
+			}
+		} else {
+			var childRunning = child.spawn(cmd, { shell: true, stdio: options.writeToConsole ? "inherit" : null });
+		}
+	} else if (typeof(options.shell) === "string") {
+		var shellExecutable = options.shell.split(" ")[0];
+		var childRunning = child.spawn(shellExecutable, options.shell.split(" ").slice(1).concat([cmd]), { stdio: options.writeToConsole ? "inherit" : null });
 	}
 
 	return childRunning;
@@ -60,9 +86,13 @@ Rule.prototype.start = function () {
 			return;
 		}
 		if (this.getOption("debug")) {
-			debugLog(chalk.green("Restart"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+			debugLog(chalk.green("Restart"), this._ruleOptions.cmdOrFun.toString());
 		}
-		this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
+		this._childRunning = exec(this._ruleOptions.cmdOrFun, {
+			writeToConsole: this.getOption("writeToConsole"),
+			shell: this.getOption("shell"),
+			debug: this.getOption("debug")
+		});
 		this._childRunning.on("exit", function (code) {
 			this._childRunning = null;
 			if (code !== null) { // not killed
@@ -86,7 +116,11 @@ Rule.prototype.start = function () {
 						if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 							this._ruleOptions.cmdOrFun(p, action);
 						} else {
-							this._childRunning = exec(this._ruleOptions.cmdOrFun, { writeToConsole: this.getOption("writeToConsole") });
+							this._childRunning = exec(this._ruleOptions.cmdOrFun, {
+								writeToConsole: this.getOption("writeToConsole"),
+								shell: this.getOption("shell"),
+								debug: this.getOption("debug")
+							});
 							this._childRunning.on("exit", function () {
 								this._childRunning = null;
 							}.bind(this));
@@ -243,6 +277,7 @@ Watcher.prototype._defaultOptions = {
 	//queue: true, // exec calback if it's already executing
 	restartOnError: true, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
+	shell: true, // use this shell for running cmds, or default shell(true)
 	//cwd: "path for resolving",
 	//persistLog: true, // save logs in files
 	//logDir: "./logs",
