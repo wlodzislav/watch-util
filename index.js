@@ -180,8 +180,9 @@ Rule.prototype.getOption = function (name) {
 Rule.prototype.stop = function () {
 	if (this._started) {
 		if (this._childRunning) {
-			terminate(this._childRunning.pid, restart);
-			this._childRunning = null;
+			terminate(this._childRunning.pid, function () {
+				this._childRunning = null;
+			});
 		}
 		clearInterval(this._reglobInterval);
 		this._reglobInterval = null;
