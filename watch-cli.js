@@ -7,7 +7,7 @@ program
 	.option("-g --glob <patterns>", "Patterns to watch, separated by comma, ignore pattern starts with '!', for exact pattern syntax see: https://github.com/isaacs/node-glob")
 	.option("-d --debounce <ms>", "Debounce exec/reload by ms, used for editors like vim that mv then rm files for crash safety")
 	.option("-G --reglob <ms>", "Reglob interval to track new added files, on ms")
-	.option("--no-restart-on-error", "Don't restart cmd if cmd crashes or exited with non 0 status")
+	.option("--restart-on-error", "Restart cmd if cmd crashed or exited with non 0 status")
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
 	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
 	.option("--debug", "Print debug info");

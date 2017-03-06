@@ -275,7 +275,7 @@ Watcher.prototype._defaultOptions = {
 	debounce: 500, // exec/reload once in ms at max
 	reglob: 2000, // perform reglob to watch added files
 	//queue: true, // exec calback if it's already executing
-	restartOnError: true, // restart if exit code != 0
+	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
 	shell: true, // use this shell for running cmds, or default shell(true)
 	//cwd: "path for resolving",
