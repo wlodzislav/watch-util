@@ -77,10 +77,18 @@ Rule.prototype.start = function () {
 	this._watchers = {};
 
 	this._childRunning = null;
-	var restart = function () {
+	var restart = function (err) {
+		if(err && this._childRunning){
+			debugLog(chalk.red("Terminating error:"), err.message);
+			debugLog(chalk.green("Kill"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+			this._childRunning.kill(this.getOption("killSignal"));
+
+			return restart();
+		}
+
 		if (this._childRunning) {
 			if (this.getOption("debug")) {
-				debugLog(chalk.green("Kill"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+				debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
 			}
 			terminate(this._childRunning.pid, restart);
 			return;
@@ -284,6 +292,7 @@ Watcher.prototype._defaultOptions = {
 	//persistLog: true, // save logs in files
 	//logDir: "./logs",
 	//logRotation: "5h", // s,m,h,d,M
+	killSignal: "SIGTERM", // used if package terminate will return error
 	writeToConsole: true, // write logs to console
 	mtimeCheck: true,
 	debug: false
