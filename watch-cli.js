@@ -1,5 +1,5 @@
 var program = require('commander');
-var Watcher = require("./index");
+var Watcher = require("./index").Watcher;
 
 program
 	.usage("[options] -- <shell cmd>\n\n    Util for restarting/execution  shell commands on files changes")

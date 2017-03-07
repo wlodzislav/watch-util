@@ -1,7 +1,7 @@
 var program = require("commander");
 var WebSocketServer = require("ws").Server;
 var http = require("http");
-var Watcher = require("./index");
+var Watcher = require("./index").Watcher;
 
 program
 	.option("-p --port <port>", "Port to listen for WebSockets")

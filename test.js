@@ -1,5 +1,5 @@
 var assert = require("assert");
-var Watcher = require("./index");
+var Watcher = require("./index").Watcher;
 var shelljs = require("shelljs");
 var fs = require("fs");
 

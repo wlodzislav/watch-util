@@ -279,8 +279,6 @@ function Watcher(globalOptions) {
 	this._watcherId = 0;
 }
 
-Watcher.prototype.Rule = Rule;
-
 Watcher.prototype._defaultOptions = {
 	debounce: 500, // exec/reload once in ms at max
 	reglob: 2000, // perform reglob to watch added files
@@ -421,4 +419,5 @@ Watcher.prototype.stopAll = function () {
 	});
 };
 
-module.exports = Watcher;
+module.exports.Watcher = Watcher;
+module.exports.Rule = Rule;
