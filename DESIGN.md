@@ -21,132 +21,75 @@ Features
 API
 ===
 
-// Constructor
-var watcher = Watcher({
-	debounce: "300ms", // exec/reload once in ms at max
-	queue: true, // exec calback if it's already executing
-	reglob: "3s", // perform reglob to watch added files
-	restartOnError: true, // restart if exit code != 0
+Watcher constructor
+	var watcher = Watcher(options)
+	var watcher = Watcher(globs, cmdOrFun)
+	var watcher = Watcher(globs, options, cmdOrFun)
+
+Options are:
+	globs: ["*.js"], // array of globs
+	cmd: "...", // shell chd to exec/reload, used if created with options only
+	fun: function (fileName, action) {...}, // function to exed, used if created with options only
+	debounce: 500, // exec/reload once in ms at max
+	reglob: 2000, // perform reglob to watch added files
+	//queue: true, // exec calback if its already executing
+	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
-	cwd: "path for resolving",
-	persistLog: true, // save logs in files
-	logDir: "./logs",
-	logRotation: "5h", // s,m,h,d,M
-	writeToConsole: true // write logs to console
-});
+	shell: true, // use this shell for running cmds, or default shell(true)
+	//cwd: "path for resolving",
+	//persistLog: true, // save logs in files
+	//logDir: "./logs",
+	//logRotation: "5h", // s,m,h,d,M
+	killSignal: "SIGTERM", // used if package terminate will return error
+	writeToConsole: true, // write logs to console
+	mtimeCheck: true,
+	debug: false
 
-// Create from file of from json object
-var watcher = Watcher.load(fileName)
+Serialize
+	watcher.toJSON({ stringifyFun: true }) Note! Functions are serialized using .toString()
 
-// Get watcher options
-watcher.options()
+Manage options
+	watcher.options()
+	watcher.options(values)
+	watcher.mergeOptions(values)
+	watcher.getOption("name")
+	watcher.setOption("name", value)
 
-// Set watcher options
-watcher.options(values)
+Run/stop
+	watcher.start()
+	watcher.stop()
+	watcher.restart()
+	watcher.isStarted()
 
-// Set watcher option value, all rules will be restarted
-watcher.setOption("name", value)
+PM Constructor
+	var pm = ProcessesManager(options);
 
-// Add rules
-// exec rule executes cmdOrFun when files watched by glob are changed
-// restart rule restarts cmdOfFun when filew are changed
-// options are optional and could overwrite any params from Watcher constructor
-// cmdOrFun could be shell cmd or function
-// rules are stopped by default
-watcher.addExecRule([globPattern], optionalOptions, cmdOrFun)
-watcher.addRestartRule([globPattern], {
-	name: "name for log file", // by default log is named with generated id
-	// + all options from Watcher()
-}, cmdOrFun)
-watcher.addRule(options)
+Options are the same as in Watcher(), and:
+	watchers: [] // each watchers settings
 
-// Serialize watcher
-watcher.toJSON() // Note! Functions are serialized using .toString()
+Serialize pm settings
+	pm.toJSON({ stringifyFun: true })
 
-// Serialize watcher and write to file
-watcher.save(fileName)
+Manage options
+	pm.options()
+	pm.options(values)
+	pm.mergeOptions(values)
+	pm.getOption("name")
+	pm.setOption("name", value)
 
-// Start REST api server
-watcher.startREST({ port })
+Manage watchers
+	pm.addWatcher(watcher)
+	pm.addWatcher(watcherOptions)
+	pm.addWatcher(globs, cmdOrFun)
+	pm.addWatcher(globs, watcherOptions, cmdOrFun)
+	pm.getWatcherById(id)
+	pm.watchers()
 
-// Get rule by id
-watcher.getRuleById(id)
-
-// Stop wathing/executing all rules
-watcher.stopAll()
-
-// Start wathing/executing all rules
-watcher.startAll()
-
-// Stop then start wathing/executing all rules
-watcher.restartAll()
-
-// Stop then start wathing/executing all rules
-watcher.restartAllStarted()
-
-// Get all rules
-watcher.rules() // [rule]
-
-// Stop watching/eecuting
-rule.stop()
-
-// Start watching/eecuting
-rule.start()
-
-// Stop then start watching/eecuting
-rule.restart()
-
-// Get started flag
-rule.isStarted()
-
-// Get rule options merged with Watcher options and defaults
-rule.options() // { type: "exec/reload", name, cmd, fun, debounce, queue, reglob, restartOnError, restartOnSuccess, logFile }
-
-// Set rule options
-rule.options(values)
-
-// Set options, rule will be restarted
-rule.setOption("name", value)
-
-// Stop and delete rule
-rule.delete()
-
-// ReadStream for logs
-rule.log.readStream
-
-// Get all logs from rule
-rule.log.all()
-
-// Get all n last strings from logs
-rule.log.tail(n)
-
-// Get step lines from offset counting from the last
-rule.log.getLastLines(offset, step)
-
-// Get lines in data interval
-rule.log.getByDateInterval(from, to)
-
-// Write logs in memory to file using log options
-rule.log.dump()
-
-// Write logs in memory to specific file
-rule.log.dump(path)
-
-// Serialize rule
-rule.toJSON()
-
-CLI API
-=======
-
-supervisor
-
-	-r --restart
-	-e --exec
-	-g --glob ""
-	-d --debounce ""
-	-G --reglob ""
-	-E --no-/--restart-on-error
-	-S --no-/--restart-on-success
+Run/stop wathers
+	pm.startAll()
+	pm.stopAll()
+	pm.restartAll()
+	pm.restartAllStarted()
 
 REST API
 ========
