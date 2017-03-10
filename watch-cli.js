@@ -21,12 +21,9 @@ program.on('--help', function(){
 
 program.parse(process.argv);
 
-var watcher = Watcher(program);
-
 if (program.exec) {
-	watcher.addExecRule(program.glob, program.args.join(" "));
-} else {
-	watcher.addRestartRule(program.glob, program.args.join(" "));
+	program.type = "exec";
 }
 
-watcher.startAll();
+var watcher = Watcher(program.glob, program, program.args.join(" "));
+watcher.start();

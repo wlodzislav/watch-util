@@ -68,12 +68,12 @@ function createProxyWatcher() {
 	var target = {
 		__calls: [],
 		send: function () {
-			send({ eval: "watcher." + this.__calls.map(function (c) { return c.name + "(" + c.args.map(JSON.stringify.bind(JSON)).join(", ") + ")"; }).join(".") });
+			send({ eval: "pm." + this.__calls.map(function (c) { return c.name + "(" + c.args.map(JSON.stringify.bind(JSON)).join(", ") + ")"; }).join(".") });
 			this.__calls = [];
 			return proxy;
 		},
 		sendResult: function (callback) {
-			sendResult({ evalResult: "watcher." + this.__calls.map(function (c) { return c.name + "(" + c.args.map(JSON.stringify.bind(JSON)).join(", ") + ")"; }).join(".") }, callback);
+			sendResult({ evalResult: "pm." + this.__calls.map(function (c) { return c.name + "(" + c.args.map(JSON.stringify.bind(JSON)).join(", ") + ")"; }).join(".") }, callback);
 			this.__calls = [];
 			return proxy;
 		},
@@ -112,9 +112,9 @@ program
 	.command("eval <code>")
 	.description("Eval line of code directly in daemon")
 	.action(function (code) {
-		connectToDaemon(function (watcher) {
+		connectToDaemon(function (pm) {
 			sendResult({ evalResult: code }, function (err, result) {
-				watcher.close();
+				pm.close();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
@@ -140,9 +140,9 @@ program
 		}
 		if (+cmdOrId == ""+cmdOrId && !options.glob) {
 			// start existing process
-			connectToDaemon(function (watcher) {
-				watcher.startById(+cmdOrId).sendResult(function (err) {
-					watcher.close()
+			connectToDaemon(function (pm) {
+				pm.startById(+cmdOrId).sendResult(function (err) {
+					pm.close()
 					if (err) {
 						logError(err);
 						process.exit(errorCodeToExitCode[err.code]);
@@ -151,8 +151,8 @@ program
 			});
 		} else {
 			// start new process
-			connectToDaemon(function (watcher) {
-				watcher.addRule({
+			connectToDaemon(function (pm) {
+				pm.addRule({
 					type: options.exec ? "exec" : "restart",
 					globPatterns: options.glob,
 					cmdOrFun: cmdOrId,
@@ -161,7 +161,7 @@ program
 					restartOnError: options.restartOnError,
 					restartOnSuccess: options.restartOnSuccess
 				}).start().sendResult(function (err) {
-					watcher.close()
+					pm.close()
 					if (err) {
 						logError(err);
 						process.exit(errorCodeToExitCode[err.code]);
@@ -190,9 +190,9 @@ program
 	.option("--json", "Print in json format")
 	.option("--plain", "Print in plain text format")
 	.action(function (options) {
-		connectToDaemon(function (watcher) {
-			watcher.rules().toJSON().sendResult(function (err, result) {
-				watcher.close();
+		connectToDaemon(function (pm) {
+			pm.rules().toJSON().sendResult(function (err, result) {
+				pm.close();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
@@ -227,9 +227,9 @@ program
 	.command("stop <id>")
 	.description("Stop process by id")
 	.action(function (id) {
-		connectToDaemon(function (watcher) {
-			watcher.stopById(+id).sendResult(function (err, result) {
-				watcher.close();
+		connectToDaemon(function (pm) {
+			pm.stopById(+id).sendResult(function (err, result) {
+				pm.close();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
@@ -242,9 +242,9 @@ program
 	.command("restart <id>")
 	.description("Restart process by id")
 	.action(function (id) {
-		connectToDaemon(function (watcher) {
-			watcher.restartById(+id).sendResult(function (err, result) {
-				watcher.close();
+		connectToDaemon(function (pm) {
+			pm.restartById(+id).sendResult(function (err, result) {
+				pm.close();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
@@ -257,9 +257,9 @@ program
 	.command("delete <id>")
 	.description("Delete process by id")
 	.action(function (id) {
-		connectToDaemon(function (watcher) {
-			watcher.deleteById(+id).sendResult(function (err, result) {
-				watcher.close();
+		connectToDaemon(function (pm) {
+			pm.deleteById(+id).sendResult(function (err, result) {
+				pm.close();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);

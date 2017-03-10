@@ -1,7 +1,7 @@
 var program = require("commander");
 var WebSocketServer = require("ws").Server;
 var http = require("http");
-var Watcher = require("./index").Watcher;
+var PM = require("./index").PM;
 
 program
 	.option("-p --port <port>", "Port to listen for WebSockets")
@@ -12,7 +12,7 @@ program.parse(process.argv);
 var defaultPort = 9876;
 program.port = program.port || defaultPort;
 
-var watcher = Watcher({ debug: program.debug });
+var pm = PM({ debug: program.debug });
 
 var server = http.createServer();
 server.listen(program.port);
@@ -39,9 +39,8 @@ wss.on("connection", function(ws) {
 				console.log(result);
 				ws.send(JSON.stringify({ result: result }));
 			} catch (err) {
-				console.log("Crash on eval", message.eval);
-				//console.log(err);
-				console.log(JSON.stringify({ err: err }));
+				console.log("Crash on eval", message.evalResult);
+				console.log(err);
 				ws.send(JSON.stringify({ err: err }));
 			}
 		}
