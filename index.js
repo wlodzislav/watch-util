@@ -10,6 +10,14 @@ debugLog = function () {
 	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
 }
 
+function shallowCopyObj(obj) {
+	var copy = {};
+	for (var key in obj) {
+		copy[key] = obj[key];
+	}
+	return copy;
+}
+
 var isShAvailableOnWin = undefined;
 function checkShAvailableOnWin() {
 	try {
@@ -86,12 +94,13 @@ function Watcher(globs, ruleOptions, cmdOrFun) {
 
 	var ruleOptions;
 	if (arguments.length === 1) {
-		ruleOptions = arguments[0];
+		ruleOptions = shallowCopyObj(arguments[0]);
 	} else if (arguments.length === 2) {
 		ruleOptions = {};
 		ruleOptions.globPatterns = arguments[0];
 		ruleOptions.cmdOrFun = arguments[1];
 	} else {
+		ruleOptions = shallowCopyObj(ruleOptions);
 		ruleOptions.globPatterns = globs;
 		ruleOptions.cmdOrFun = cmdOrFun;
 	}
@@ -247,6 +256,10 @@ Watcher.prototype.start = function () {
 	return this;
 };
 
+Watcher.prototype.options = function () {
+	return this._ruleOptions;
+}
+
 Watcher.prototype.getOption = function (name) {
 	if (this._watcher) {
 		return [this._ruleOptions[name], this._watcher._globalOptions[name], defaultOptions[name]].find(function (v) {
@@ -371,25 +384,14 @@ PM.prototype.addRule = function (globs, ruleOptions, cmdOrFun) {
 	if(ruleOptions instanceof Watcher){
 		rule = arguments[0];
 	}else{
-		var ruleOptions;
-		if (arguments.length === 1) {
-			ruleOptions = arguments[0];
-		} else if (arguments.length === 2) {
-			ruleOptions = {};
-			ruleOptions.globPatterns = arguments[0];
-			ruleOptions.cmdOrFun = arguments[1];
-		} else {
-			ruleOptions.globPatterns = globs;
-			ruleOptions.cmdOrFun = cmdOrFun;
-		}
+		rule = Watcher.apply(null, arguments);
 		if (this.getOption("debug")) {
-			if (typeof(ruleOptions.cmdOrFun) === "function") {
-				var ruleOptionsCopy = JSON.parse(JSON.stringify(ruleOptions));
+			if (typeof(rule.options().cmdOrFun) === "function") {
+				var ruleOptionsCopy = JSON.parse(JSON.stringify(rule.options()));
 				ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
 			}
 			debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
 		}
-		rule = new Watcher(ruleOptions);
 		rule.id = ruleId();
 	}
 
