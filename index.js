@@ -131,7 +131,7 @@ Watcher.prototype.start = function () {
 			if (this.getOption("debug")) {
 				debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
 			}
-			terminate(this._childRunning.pid, restart);
+			terminate(this._childRunning.pid, { pollInterval: this.getOption("terminatePollInterval"), timeout: this.getOption("terminateTimeout") }, restart);
 			return;
 		}
 		if (this.getOption("debug")) {
@@ -275,7 +275,7 @@ Watcher.prototype.getOption = function (name) {
 Watcher.prototype.stop = function () {
 	if (this._started) {
 		if (this._childRunning) {
-			terminate(this._childRunning.pid, function () {
+			terminate(this._childRunning.pid, { pollInterval: this.getOption("terminatePollInterval"), timeout: this.getOption("terminateTimeout") }, function () {
 				this._childRunning = null;
 			});
 		}
@@ -344,7 +344,9 @@ var defaultOptions = {
 	killSignal: "SIGTERM", // used if package terminate will return error
 	writeToConsole: true, // write logs to console
 	mtimeCheck: true,
-	debug: false
+	debug: false,
+	terminatePollInterval: 200,
+	terminateTimeout: 2000
 };
 
 PM.prototype.getOption = function (name) {
