@@ -1,4 +1,5 @@
 var fs = require("fs");
+var path = require("path");
 var globby = require("globby");
 var underscore = require("underscore");
 var child = require('child_process');
@@ -162,12 +163,25 @@ Watcher.prototype.start = function () {
 		var paths = globby.sync(preprocessGlobPatters(this._ruleOptions.globPatterns));
 		paths.forEach(function (p) {
 			if (!this._watchers[p]) {
-				var execCallback = underscore.debounce(function (action) {
+				var execCallback = underscore.debounce(function (action, filePath) {
 					if (this._ruleOptions.type === "exec") {
 						if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 							this._ruleOptions.cmdOrFun(p, action);
 						} else {
-							this._childRunning = exec(this._ruleOptions.cmdOrFun, {
+							var cwd = path.resolve(".")
+							var relFile = filePath;
+							var file = path.resolve(filePath);
+							var relDir = path.dirname(filePath);
+							var dir = path.resolve(path.dirname(filePath));
+							var cmd = this._ruleOptions.cmdOrFun
+								.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "cwd", "g"), cwd)
+								.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "relfile", "g"), relFile)
+								.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "file", "g"), file)
+								.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "reldir", "g"), relDir)
+								.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "dir", "g"), dir)
+								.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "action", "g"), action);
+
+							this._childRunning = exec(cmd, {
 								writeToConsole: this.getOption("writeToConsole"),
 								shell: this.getOption("shell"),
 								debug: this.getOption("debug")
@@ -203,7 +217,7 @@ Watcher.prototype.start = function () {
 							stat = fs.statSync(p);
 						} catch (err) {
 							if (err.code == "ENOENT") {
-								return execCallback("remove");
+								return execCallback("remove", p);
 							}
 						}
 						if (action == "rename") {
@@ -212,11 +226,11 @@ Watcher.prototype.start = function () {
 
 						if (this.getOption("mtimeCheck")) {
 							if (stat.mtime > mtime) {
-								execCallback(action);
+								execCallback(action, p);
 								mtime = stat.mtime;
 							}
 						} else {
-							execCallback(action);
+							execCallback(action, p);
 						}
 					}.bind(this));
 					if (this.getOption("debug")) {
@@ -228,7 +242,7 @@ Watcher.prototype.start = function () {
 				rewatch();
 
 				if (!firstTime) {
-					execCallback("create");
+					execCallback("create", p);
 				}
 			}
 		}.bind(this));
@@ -346,7 +360,8 @@ var defaultOptions = {
 	mtimeCheck: true,
 	debug: false,
 	terminatePollInterval: 200,
-	terminateTimeout: 2000
+	terminateTimeout: 2000,
+	execVariablePrefix: "$"
 };
 
 PM.prototype.getOption = function (name) {
