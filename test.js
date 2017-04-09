@@ -22,7 +22,7 @@ describe("", function () {
 		setTimeout(done, 100);
 	});
 
-	var defaultOptions = { reglob: 10, debounce: 0, mtimeCheck: false };
+	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false };
 
 	it("on create", function (done) {
 		var w = new Watcher(["temp/a"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
@@ -121,7 +121,7 @@ describe("", function () {
 					shelljs.touch("temp/f");
 				}, 0);
 			}
-			if (changes >= 3) {
+			if (changes >= 2) {
 				var content = fs.readFileSync("temp/g", "utf8");
 				assert.ok(content.startsWith("run\nrun\n"));
 				w1.stop();
@@ -135,7 +135,7 @@ describe("", function () {
 		w2.start();
 		setTimeout(function () {
 			shelljs.touch("temp/f");
-		}, 200);
+		}, 50);
 	});
 
 	it("cmd restart, exiting cmd", function (done) {
@@ -149,7 +149,7 @@ describe("", function () {
 					shelljs.touch("temp/b2");
 				}, 0);
 			}
-			if (changes >= 3) {
+			if (changes >= 2) {
 				var content = fs.readFileSync("temp/a2", "utf8");
 				assert.ok(content.startsWith("run\nrun\n"));
 				w1.stop();
@@ -163,7 +163,7 @@ describe("", function () {
 		w2.start();
 		setTimeout(function () {
 			shelljs.touch("temp/b2");
-		}, 200);
+		}, 50);
 	});
 
 	it("cmd restart on error", function (done) {
