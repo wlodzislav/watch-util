@@ -2,7 +2,7 @@ var fs = require("fs");
 var path = require("path");
 var child = require('child_process');
 
-var globby = require("globby");
+var glob = require("glob");
 var chalk = require("chalk");
 var psTree = require('ps-tree');
 var async = require("async");
@@ -47,23 +47,6 @@ function exec(cmd, options) {
 	}
 
 	return childRunning;
-}
-
-function preprocessGlobPatters(patterns) {
-	if (!Array.isArray(patterns)) {
-		patterns = patterns.split(",");
-	}
-	var additional = [];
-	patterns.forEach(function (p) {
-		if (p.startsWith("!") && !p.endsWith("**/*")) {
-			if (p.endsWith("/")) {
-				additional.push(p+"**/*");
-			} else {
-				additional.push(p+"/**/*");
-			}
-		}
-	});
-	return patterns.concat(additional);
 }
 
 function getProcessChildren(pid, callback) {
@@ -137,6 +120,48 @@ function terminate(pid, options, callback) {
 	var timeoutTimeout = setTimeout(function () {
 		clearAndCallback("Terminate timedout");
 	}, options.timeout);
+}
+
+function preprocessGlobPatters(patterns) {
+	if (!Array.isArray(patterns)) {
+		patterns = patterns.split(",");
+	}
+	var additional = [];
+	patterns.forEach(function (p) {
+		if (p.startsWith("!") && !p.endsWith("**/*")) {
+			if (p.endsWith("/")) {
+				additional.push(p+"**/*");
+			} else {
+				additional.push(p+"/**/*");
+			}
+		}
+	});
+	return patterns.concat(additional);
+}
+
+function globWithNegates(patterns) {
+	var includePatterns = [];
+	var excludePatterns = [];
+
+	patterns.forEach(function (p) {
+		if (p.startsWith("!") && !p.startsWith("!(")) {
+			excludePatterns.push(p.substr(1));
+		} else {
+			includePatterns.push(p);
+		}
+	});
+
+	var resultHash = {};
+	includePatterns.forEach(function (pattern) {
+		if (excludePatterns.length) {
+			var options = { ignore: excludePatterns };
+		}
+		var paths = glob.sync(pattern, options);
+		paths.forEach(function (p) {
+			resultHash[p] = true;
+		});
+	});
+	return Object.keys(resultHash);
 }
 
 var _ruleId = 0;
@@ -273,7 +298,7 @@ Watcher.prototype.start = function () {
 		}
 	}.bind(this), this.getOption("debounce"));
 	var reglob = function () {
-		var paths = globby.sync(preprocessGlobPatters(this._ruleOptions.globPatterns));
+		var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globPatterns));
 
 		paths.forEach(function (p) {
 			if (!this._watchers[p]) {
