@@ -3,12 +3,12 @@ var path = require("path");
 var child = require('child_process');
 
 var globby = require("globby");
-var underscore = require("underscore");
 var chalk = require("chalk");
 var psTree = require('ps-tree');
 var async = require("async");
 
 var utils = require("./utils");
+var debounce = utils.debounce;
 var debugLog = utils.debugLog;
 var shallowCopyObj = utils.shallowCopyObj;
 
@@ -241,7 +241,7 @@ Watcher.prototype.start = function () {
 
 	this._childRunning = null;
 	var firstTime = true;
-	var execCallback = underscore.debounce(function (action, filePath) {
+	var execCallback = debounce(function (action, filePath) {
 		if (this._ruleOptions.type === "exec") {
 			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 				this._ruleOptions.cmdOrFun(filePath, action);
@@ -301,7 +301,8 @@ Watcher.prototype.start = function () {
 							if (err.code == "ENOENT") {
 								this._watchers[p].close();
 								delete this._watchers[p];
-								return execCallback("remove", p);
+								execCallback("remove", p);
+								return;
 							}
 						}
 						if (action == "rename") {

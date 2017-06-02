@@ -30,6 +30,34 @@ function assign(/* sources... */) {
 	return target;
 }
 
+function debounce(fun, duration) {
+	var timeout;
+	var context;
+	var args;
+	var last;
+
+	var check = function() {
+		var elapsed = Date.now() - last;
+
+		if (elapsed < duration) {
+			timeout = setTimeout(check, duration - elapsed);
+		} else {
+			timeout = null;
+			fun.apply(context, args);
+		}
+	};
+
+	return function() {
+		context = this;
+		args = arguments;
+		last = Date.now();
+		if (!timeout) {
+			timeout = setTimeout(check, duration);
+		}
+	};
+};
+
 module.exports.debugLog = debugLog;
 module.exports.shallowCopyObj = shallowCopyObj;
 module.exports.assign = assign;
+module.exports.debounce = debounce;
