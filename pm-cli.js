@@ -1,14 +1,13 @@
-var program = require("commander");
 var child = require("child_process");
+
+var program = require("commander");
 var WebSocketClient = require('ws');
-var moment = require("moment");
 var chalk = require("chalk");
 var TerminalTable = require('cli-table');
-var _ = require("lodash");
 
-debugLog = function () {
-	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
-}
+var utils = require("./utils");
+var debugLog = utils.debugLog;
+var assign = utils.assign;
 
 var defaultPort = 9876;
 
@@ -205,7 +204,7 @@ program
 						console.log(chalk.red("No processes started"));
 						return;
 					}
-					var table = new TerminalTable(_.assign({
+					var table = new TerminalTable(assign({
 						head: ["ID", "TYPE", "STARTED", "GLOB", "CMD"],
 					}, options.plain ? plainTableOptions : tableOptions));
 					result.forEach(function (row) {

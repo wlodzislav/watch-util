@@ -1,4 +1,5 @@
 var program = require('commander');
+
 var Watcher = require("./index").Watcher;
 
 program

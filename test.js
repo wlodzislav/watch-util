@@ -1,8 +1,9 @@
 var assert = require("assert");
-var Watcher = require("./index").Watcher;
 var shelljs = require("shelljs");
 var fs = require("fs");
-var _ = require("lodash");
+var assign = require("./utils").assign;
+
+var Watcher = require("./index").Watcher;
 
 describe("", function () {
 	this.timeout(5000);
@@ -25,7 +26,7 @@ describe("", function () {
 	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false };
 
 	it("on create", function (done) {
-		var w = new Watcher(["temp/a"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w = new Watcher(["temp/a"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			assert.equal(fileName, "temp/a");
 			assert.equal(action, "create");
 			w.stop();
@@ -40,7 +41,7 @@ describe("", function () {
 
 	it("on change", function (done) {
 		shelljs.touch("temp/b");
-		var w = Watcher(["temp/b"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w = Watcher(["temp/b"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			assert.equal(fileName, "temp/b");
 			assert.equal(action, "change");
 			w.stop();
@@ -56,7 +57,7 @@ describe("", function () {
 	it("on change multiple", function (done) {
 		shelljs.touch("temp/b2");
 		var changes = 0;
-		var w = Watcher(["temp/b2"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w = Watcher(["temp/b2"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			assert.equal(fileName, "temp/b2");
 			assert.equal(action, "change");
 			changes++;
@@ -81,7 +82,7 @@ describe("", function () {
 
 	it("on remove", function (done) {
 		shelljs.touch("temp/c");
-		var w = Watcher(["temp/c"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w = Watcher(["temp/c"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			assert.equal(fileName, "temp/c");
 			assert.equal(action, "remove");
 			w.stop();
@@ -96,12 +97,12 @@ describe("", function () {
 
 	it("cmd exec", function (done) {
 		shelljs.touch("temp/d");
-		var w1 = Watcher(["temp/e"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w1 = Watcher(["temp/e"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			w1.stop();
 			w2.stop();
 			done();
 		});
-		var w2 = Watcher(["temp/d"], _.defaults({ type: "exec", shell: "node -e" }, defaultOptions), "require(\"shelljs\").touch(\"temp/e\")");
+		var w2 = Watcher(["temp/d"], assign({ type: "exec", shell: "node -e" }, defaultOptions), "require(\"shelljs\").touch(\"temp/e\")");
 
 		w1.start();
 		w2.start();
@@ -113,7 +114,7 @@ describe("", function () {
 	it("cmd restart", function (done) {
 		shelljs.touch("temp/f");
 		var changes = 0;
-		var w1 = Watcher(["temp/g"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w1 = Watcher(["temp/g"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			changes++;
 
 			if (changes === 1) {
@@ -129,7 +130,7 @@ describe("", function () {
 				done();
 			}
 		});
-		var w2 = Watcher(["temp/f"], _.defaults({ shell: "node -e", writeToConsole: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g\"); setInterval(function () {}, 100);");
+		var w2 = Watcher(["temp/f"], assign({ shell: "node -e", writeToConsole: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g\"); setInterval(function () {}, 100);");
 
 		w1.start();
 		w2.start();
@@ -141,7 +142,7 @@ describe("", function () {
 	it("cmd restart, exiting cmd", function (done) {
 		shelljs.touch("temp/b2");
 		var changes = 0;
-		var w1 = Watcher(["temp/a2"], _.defaults({ type: "exec" }, defaultOptions), function (fileName0, action) {
+		var w1 = Watcher(["temp/a2"], assign({ type: "exec" }, defaultOptions), function (fileName0, action) {
 			changes++;
 
 			if (changes === 1) {
@@ -157,7 +158,7 @@ describe("", function () {
 				done();
 			}
 		});
-		var w2 = Watcher(["temp/b2"],  _.defaults({ shell: "node -e", writeToConsole: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/a2\"); setTimeout(function () {}, 100);");
+		var w2 = Watcher(["temp/b2"],  assign({ shell: "node -e", writeToConsole: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/a2\"); setTimeout(function () {}, 100);");
 
 		w1.start();
 		w2.start();
@@ -168,7 +169,7 @@ describe("", function () {
 
 	it("cmd restart on error", function (done) {
 		var changes = 0;
-		var w1 = Watcher(["temp/g2"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w1 = Watcher(["temp/g2"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			changes++;
 
 			if (changes >= 5) {
@@ -177,7 +178,7 @@ describe("", function () {
 				done();
 			}
 		});
-		var w2 = Watcher(["temp/f2"], _.defaults({ shell: "node -e", writeToConsole: false, restartOnError: true }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g2\"); process.exit(1);");
+		var w2 = Watcher(["temp/f2"], assign({ shell: "node -e", writeToConsole: false, restartOnError: true }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g2\"); process.exit(1);");
 
 		w1.start();
 		w2.start();
@@ -185,10 +186,10 @@ describe("", function () {
 
 	it("cmd don't restart on error", function (done) {
 		var changes = 0;
-		var w1 = Watcher(["temp/g3"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w1 = Watcher(["temp/g3"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			changes++;
 		});
-		var w2 = Watcher(["temp/f3"], _.defaults({ shell: "node -e", writeToConsole: false, restartOnError: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g3\"); process.exit(1);");
+		var w2 = Watcher(["temp/f3"], assign({ shell: "node -e", writeToConsole: false, restartOnError: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g3\"); process.exit(1);");
 		setTimeout(function () {
 			assert.equal(changes, 1);
 			w1.stop();
@@ -201,7 +202,7 @@ describe("", function () {
 	
 	it("cmd restart on success", function (done) {
 		var changes = 0;
-		var w1 = Watcher(["temp/g4"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w1 = Watcher(["temp/g4"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			changes++;
 
 			if (changes >= 5) {
@@ -210,17 +211,17 @@ describe("", function () {
 				done();
 			}
 		});
-		var w2 = Watcher(["temp/f4"], _.defaults({ shell: "node -e", writeToConsole: false, restartOnSuccess: true }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g4\"); process.exit(0);");
+		var w2 = Watcher(["temp/f4"], assign({ shell: "node -e", writeToConsole: false, restartOnSuccess: true }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g4\"); process.exit(0);");
 		w1.start();
 		w2.start();
 	});
 
 	it("cmd don't restart on success", function (done) {
 		var changes = 0;
-		var w1 = Watcher(["temp/g5"], _.defaults({ type: "exec" }, defaultOptions), function (fileName, action) {
+		var w1 = Watcher(["temp/g5"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			changes++;
 		});
-		var w2 = Watcher(["temp/f5"], _.defaults({ shell: "node -e", writeToConsole: false, restartOnSuccess: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g5\"); process.exit(0);");
+		var w2 = Watcher(["temp/f5"], assign({ shell: "node -e", writeToConsole: false, restartOnSuccess: false }, defaultOptions), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g5\"); process.exit(0);");
 		setTimeout(function () {
 			assert.equal(changes, 1);
 			w1.stop();
