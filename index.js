@@ -3,13 +3,21 @@ var path = require("path");
 var globby = require("globby");
 var underscore = require("underscore");
 var child = require('child_process');
-var moment = require("moment");
 var chalk = require("chalk");
 var psTree = require('ps-tree');
 var async = require("async");
 
-debugLog = function () {
-	console.log(moment().format("hh:mm:ss: ") + [].slice.call(arguments).join(" "));
+function pad2(n) {
+	return n < 10 ? "0" + n : n;
+}
+
+function timestamp() {
+	var now = new Date();
+	return pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
+}
+
+function debugLog() {
+	console.log(timestamp() + ": " + [].slice.call(arguments).join(" "));
 }
 
 function shallowCopyObj(obj) {

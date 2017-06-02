@@ -20,7 +20,6 @@
     "commander": "^2.9.0",
     "globby": "^6.1.0",
     "lodash": "^4.17.4",
-    "moment": "^2.17.1",
     "ps-tree": "^1.1.0",
     "terminal-table": "0.0.12",
     "underscore": "^1.8.3",
