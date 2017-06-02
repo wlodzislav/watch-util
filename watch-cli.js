@@ -10,6 +10,7 @@ program
 	.option("--restart-on-error", "Restart cmd if cmd crashed or exited with non 0 status")
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
 	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
+	.option("-p --exec-variable-prefix <prefix>", "Prefix for built-in variables interpolation in exec command")
 	.option("--debug", "Print debug info");
 
 program.on('--help', function(){

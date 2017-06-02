@@ -455,7 +455,7 @@ var defaultOptions = {
 	debug: false,
 	terminatePollInterval: 10,
 	terminateTimeout: 100,
-	execVariablePrefix: "$"
+	execVariablePrefix: "@"
 };
 
 PM.prototype.getOption = function (name) {
