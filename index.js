@@ -57,7 +57,8 @@ function getProcessChildren(pid, callback) {
 	});
 }
 
-function isDead(pid) {
+function isDeadProcessKill(pid) {
+	/* This stoped working on MacOs, node v7.2.0 */
 	try {
 		return process.kill(pid, 0);
 	} catch (err) {
@@ -66,60 +67,95 @@ function isDead(pid) {
 	return true;
 }
 
-function terminate(pid, options, callback) {
+function isDeadPsAwk(pid) {
+	return child.execSync("ps | awk -e '{ print $1 }'").toString().indexOf(pid) == -1
+}
+
+// HACK: determine working dead process check
+var isDead = isDeadProcessKill(process.pid) ? isDeadPsAwk : isDeadProcessKill;
+
+/*
+	Last retry is always SIGKILL
+*/
+function terminate(pid, options, _callback) {
 	options.signal = options.signal || "SIGTERM";
-	options.pollInterval = options.pollInterval || 10;
-	options.sigkillTimeout = options.sigkillTimeout || 100;
-	options.timeout = options.timeout || 500;
-	var checkDeadIterval;
+	options.checkInterval = options.checkInterval || 20;
+	options.retryInterval = options.retryInterval || 500;
+	options.retryCount = options.retryCount || 5;
+	options.timeout = options.timeout || 5000;
 
-	function clearAndCallback(err) {
-		clearInterval(checkDeadIterval);
-		clearTimeout(sigkillTimeout);
-		clearTimeout(timeoutTimeout);
-		callback(err);
-	}
+	var once = false;
+	var callback = function () {
+		if (!once) {
+			once = true;
+			_callback.apply(null, arguments);
+		}
+	};
 
-	function tryKill(pid, options, callback) {
-		getProcessChildren(pid, function (err, children) {
+	function tryKillParent(pid, callback) {
+
+		function retry(signal) {
+			tries++;
 			try {
-				process.kill(pid, options.signal);
+				process.kill(pid, signal);
 			} catch (err) {}
-			// wait for parent process to be dead
-			var start = Date.now();
-			clearInterval(checkDeadIterval);
-			checkDeadIterval = setInterval(function () {
-				if (isDead(pid)) {
+
+			checkDead()
+		}
+
+		retry(options.signal);
+
+		var tries = 0;
+		function checkDead() {
+			var startCheckingDead = Date.now();
+			var checkDeadIterval = setInterval(function () {
+				if (Date.now() - startCheckingDead > options.retryInterval) {
 					clearInterval(checkDeadIterval);
-					// check children
-					var aliveChildren = children.filter(function (pid) { return !isDead(pid); });
-					if (aliveChildren.length) {
-						async.forEach(aliveChildren, function (pid, callback) {
-							if (!isDead(pid)) {
-								terminate(pid, options, clearAndCallback);
-							} else {
-								clearAndCallback();
-							}
-						}, clearAndCallback)
+					if (tries < options.retryCount - 1) {
+						retry(options.signal);
+						checkDead();
+					} else if (tries < options.retryCount) {
+						checkDead();
 					} else {
-						clearAndCallback();
+						var err = new Error("Can't kill process with pid = " + pid);
+						callback(err);
 					}
 				}
-			}, options.pollInterval);
+				if (isDead(pid)) {
+					clearInterval(checkDeadIterval);
+					callback();
+				}
+			}, options.checkInterval);
+		}
+	}
+
+	function tryKillParentWithChildren(pid, callback) {
+		getProcessChildren(pid, function (err, children) {
+			tryKillParent(pid, function (err) {
+				if (err) { return callback(err); }
+
+				var aliveChildren = children.filter(function (pid) { return !isDead(pid); });
+				if (aliveChildren.length) {
+					async.forEach(aliveChildren, function (pid, callback) {
+						if (!isDead(pid)) {
+							tryKillParentWithChildren(pid, callback);
+						} else {
+							callback();
+						}
+					}, callback)
+				} else {
+					callback();
+				}
+			});
 		});
 	}
 
-	if (options.signal !== "SIGKILL") {
-		// if parent is still alive try SIGKILL
-		var sigkillTimeout = setTimeout(function () {
-			options.signal = "SIGKILL";
-			tryKill(pid, options, clearAndCallback);
-		}, options.sigkillTimeout);
-	}
-
 	var timeoutTimeout = setTimeout(function () {
-		clearAndCallback("Terminate timedout");
+		var err = new Error("Timeout. Can't kill process with pid = " + pid);
+		callback(err);
 	}, options.timeout);
+
+	tryKillParentWithChildren(pid, callback);
 }
 
 function preprocessGlobPatters(patterns) {
@@ -236,7 +272,17 @@ Watcher.prototype._terminateChild = function (callback) {
 			debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
 		}
 		this._isTerminating = true;
-		terminate(this._childRunning.pid, { pollInterval: this.getOption("terminatePollInterval"), timeout: this.getOption("terminateTimeout") }, function () {
+		terminate(this._childRunning.pid, {
+			signal: this.getOption("killSignal"),
+			checkInterval: this.getOption("killCheckInterval"),
+			retryInterval: this.getOption("killRetryInterval"),
+			retryCount: this.getOption("killRetryCount"),
+			timeout: this.getOption("killTimeout"),
+		}, function (err) {
+			if (err) {
+				console.log(err);
+				process.exit(1);
+			}
 			this._childRunning = null;
 			this._isTerminating = false;
 			if (callback) { callback(); }
@@ -467,13 +513,15 @@ var defaultOptions = {
 	//persistLog: true, // save logs in files
 	//logDir: "./logs",
 	//logRotation: "5h", // s,m,h,d,M
-	killSignal: "SIGTERM", // used if package terminate will return error
 	writeToConsole: true, // write logs to console
 	mtimeCheck: true,
 	debug: false,
-	terminatePollInterval: 10,
-	terminateTimeout: 100,
-	execVariablePrefix: "@"
+	execVariablePrefix: "@",
+	killSignal: "SIGTERM",
+	killCheckInterval: 20,
+	killRetryInterval: 500,
+	killRetryCount: 5,
+	killTimeout: 5000
 };
 
 PM.prototype.getOption = function (name) {
