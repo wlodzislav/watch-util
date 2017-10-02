@@ -3,7 +3,7 @@ var shelljs = require("shelljs");
 var fs = require("fs");
 var assign = require("./utils").assign;
 
-var Watcher = require("./index").Watcher;
+var Watcher = require("./watcher");
 
 describe("", function () {
 	this.timeout(5000);

@@ -153,7 +153,7 @@ program
 			connectToDaemon(function (pm) {
 				pm.addRule({
 					type: options.exec ? "exec" : "restart",
-					globPatterns: options.glob,
+					globs: options.glob,
 					cmdOrFun: cmdOrId,
 					debounce: options.debounce,
 					reglob: options.reglob,
@@ -212,7 +212,7 @@ program
 							row.id,
 							row.type,
 							options.plain ? (row.started ? "started" : "stopped") : (row.started ? chalk.green("started") : chalk.red("stopped")),
-							options.plain ? row.globPatterns : chalk.grey(row.globPatterns),
+							options.plain ? row.globs : chalk.grey(row.globs),
 							row.cmdOrFun
 						]);
 					});

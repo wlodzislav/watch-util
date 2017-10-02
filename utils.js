@@ -57,7 +57,12 @@ function debounce(fun, duration) {
 	};
 };
 
+function genUID() {
+	return Date.now() + Math.floor(Math.random() * 1000);
+}
+
 module.exports.debugLog = debugLog;
 module.exports.shallowCopyObj = shallowCopyObj;
 module.exports.assign = assign;
 module.exports.debounce = debounce;
+module.exports.genUID = genUID;

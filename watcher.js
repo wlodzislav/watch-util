@@ -4,13 +4,14 @@ var child = require('child_process');
 
 var glob = require("glob");
 var chalk = require("chalk");
-var psTree = require('ps-tree');
-var async = require("async");
 
 var utils = require("./utils");
 var debounce = utils.debounce;
 var debugLog = utils.debugLog;
 var shallowCopyObj = utils.shallowCopyObj;
+var genUID = utils.genUID;
+var terminate = require("./terminate");
+var defaultOptions = require("./default-options");
 
 var isShAvailableOnWin = undefined;
 function checkShAvailableOnWin() {
@@ -47,115 +48,6 @@ function exec(cmd, options) {
 	}
 
 	return childRunning;
-}
-
-function getProcessChildren(pid, callback) {
-	psTree(pid, function (err, children) {
-		if (err) { return callback(err); }
-		children = children.map(function (c) { return +c.PID; });
-		callback(null, children);
-	});
-}
-
-function isDeadProcessKill(pid) {
-	/* This stoped working on MacOs, node v7.2.0 */
-	try {
-		return process.kill(pid, 0);
-	} catch (err) {
-		return err.code !== "EPERM";
-	}
-	return true;
-}
-
-function isDeadPsAwk(pid) {
-	return child.execSync("ps | awk -e '{ print $1 }'").toString().indexOf(pid) == -1
-}
-
-// HACK: determine working dead process check
-var isDead = isDeadProcessKill(process.pid) ? isDeadPsAwk : isDeadProcessKill;
-
-/*
-	Last retry is always SIGKILL
-*/
-function terminate(pid, options, _callback) {
-	options.signal = options.signal || "SIGTERM";
-	options.checkInterval = options.checkInterval || 20;
-	options.retryInterval = options.retryInterval || 500;
-	options.retryCount = options.retryCount || 5;
-	options.timeout = options.timeout || 5000;
-
-	var once = false;
-	var callback = function () {
-		if (!once) {
-			once = true;
-			_callback.apply(null, arguments);
-		}
-	};
-
-	function tryKillParent(pid, callback) {
-
-		function retry(signal) {
-			tries++;
-			try {
-				process.kill(pid, signal);
-			} catch (err) {}
-
-			checkDead()
-		}
-
-		retry(options.signal);
-
-		var tries = 0;
-		function checkDead() {
-			var startCheckingDead = Date.now();
-			var checkDeadIterval = setInterval(function () {
-				if (Date.now() - startCheckingDead > options.retryInterval) {
-					clearInterval(checkDeadIterval);
-					if (tries < options.retryCount - 1) {
-						retry(options.signal);
-						checkDead();
-					} else if (tries < options.retryCount) {
-						checkDead();
-					} else {
-						var err = new Error("Can't kill process with pid = " + pid);
-						callback(err);
-					}
-				}
-				if (isDead(pid)) {
-					clearInterval(checkDeadIterval);
-					callback();
-				}
-			}, options.checkInterval);
-		}
-	}
-
-	function tryKillParentWithChildren(pid, callback) {
-		getProcessChildren(pid, function (err, children) {
-			tryKillParent(pid, function (err) {
-				if (err) { return callback(err); }
-
-				var aliveChildren = children.filter(function (pid) { return !isDead(pid); });
-				if (aliveChildren.length) {
-					async.forEach(aliveChildren, function (pid, callback) {
-						if (!isDead(pid)) {
-							tryKillParentWithChildren(pid, callback);
-						} else {
-							callback();
-						}
-					}, callback)
-				} else {
-					callback();
-				}
-			});
-		});
-	}
-
-	var timeoutTimeout = setTimeout(function () {
-		var err = new Error("Timeout. Can't kill process with pid = " + pid);
-		callback(err);
-	}, options.timeout);
-
-	tryKillParentWithChildren(pid, callback);
 }
 
 function preprocessGlobPatters(patterns) {
@@ -200,16 +92,6 @@ function globWithNegates(patterns) {
 	return Object.keys(resultHash);
 }
 
-var _ruleId = 0;
-function ruleId() {
-	return _ruleId++;
-}
-
-var _watcherId = 0;
-function watcherId() {
-	return _watcherId++;
-}
-
 function Watcher(globs, ruleOptions, cmdOrFun) {
 	if (!(this instanceof Watcher)) {
 		if (arguments.length === 1) {
@@ -226,17 +108,22 @@ function Watcher(globs, ruleOptions, cmdOrFun) {
 		ruleOptions = shallowCopyObj(arguments[0]);
 	} else if (arguments.length === 2) {
 		ruleOptions = {};
-		ruleOptions.globPatterns = arguments[0];
+		ruleOptions.globs = arguments[0];
 		ruleOptions.cmdOrFun = arguments[1];
 	} else {
 		ruleOptions = shallowCopyObj(ruleOptions);
-		ruleOptions.globPatterns = globs;
+		ruleOptions.globs = globs;
 		ruleOptions.cmdOrFun = cmdOrFun;
 	}
 
 	this._ruleOptions = ruleOptions;
+	this.id = this._ruleOptions.id || genUID();
+
 	if (!this._ruleOptions.type) {
 		this._ruleOptions.type = "restart";
+	}
+	if (typeof cmdOrFun === "function") {
+		this._ruleOptions.type = "exec";
 	}
 }
 
@@ -344,7 +231,7 @@ Watcher.prototype.start = function () {
 		}
 	}.bind(this), this.getOption("debounce"));
 	var reglob = function () {
-		var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globPatterns));
+		var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globs));
 
 		paths.forEach(function (p) {
 			if (!this._watchers[p]) {
@@ -390,7 +277,7 @@ Watcher.prototype.start = function () {
 						}
 					}.bind(this));
 					if (this.getOption("debug")) {
-						this._watchers[p].id = watcherId();
+						this._watchers[p].id = genUID();
 						debugLog(chalk.green("Created")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
 					}
 				}.bind(this);
@@ -435,8 +322,8 @@ Watcher.prototype.options = function () {
 }
 
 Watcher.prototype.getOption = function (name) {
-	if (this._watcher) {
-		return [this._ruleOptions[name], this._watcher._globalOptions[name], defaultOptions[name]].find(function (v) {
+	if (this._pm) {
+		return [this._ruleOptions[name], this._pm._globalOptions[name], defaultOptions[name]].find(function (v) {
 			return v != null;
 		});
 	} else {
@@ -476,168 +363,5 @@ Watcher.prototype.toJSON = function () {
 	return ruleOptionsCopy;
 };
 
-Watcher.prototype.delete = function () {
-	this.stop();
-	var index = this._watcher._rules.indexOf(this);
-	this._watcher._rules.splice(index, 1);
-	if (this.getOption("debug")) {
-		debugLog(chalk.green("Delete rule"), "index="+index);
-	}
-};
 
-function rulesToJSON() {
-	return this.map(function (r) {
-		return r.toJSON();
-	});
-}
-
-function PM(globalOptions) {
-	if (!(this instanceof PM)) { return new PM(globalOptions); }
-
-	this._globalOptions = globalOptions || {};
-	this._rules = [];
-
-	this._rules.toJSON = rulesToJSON;
-	this._ruleId = 0;
-	this._watcherId = 0;
-}
-
-var defaultOptions = {
-	debounce: 500, // exec/reload once in ms at max
-	reglob: 2000, // perform reglob to watch added files
-	//queue: true, // exec calback if it's already executing
-	restartOnError: false, // restart if exit code != 0
-	restartOnSuccess: false, // restart if exit code == 0
-	shell: true, // use this shell for running cmds, or default shell(true)
-	//cwd: "path for resolving",
-	//persistLog: true, // save logs in files
-	//logDir: "./logs",
-	//logRotation: "5h", // s,m,h,d,M
-	writeToConsole: true, // write logs to console
-	mtimeCheck: true,
-	debug: false,
-	execVariablePrefix: "@",
-	killSignal: "SIGTERM",
-	killCheckInterval: 20,
-	killRetryInterval: 500,
-	killRetryCount: 5,
-	killTimeout: 5000
-};
-
-PM.prototype.getOption = function (name) {
-	return [this._globalOptions[name], defaultOptions[name]].find(function (v) {
-		return v != null;
-	});
-};
-
-PM.prototype.addExecRule = function (globPatterns, ruleOptions, cmdOrFun) {
-	if (arguments.length === 2) {
-		cmdOrFun = arguments[1];
-		ruleOptions = {};
-	}
-
-	ruleOptions.globPatterns = globPatterns;
-	ruleOptions.type = "exec";
-	ruleOptions.cmdOrFun = cmdOrFun;
-
-	return this.addRule(ruleOptions);
-};
-
-PM.prototype.addRestartRule = function (globPatterns, ruleOptions, cmd) {
-	if (arguments.length === 2) {
-		cmd = arguments[1];
-		ruleOptions = {};
-	}
-
-	ruleOptions.globPatterns = globPatterns;
-	ruleOptions.type = "restart";
-	ruleOptions.cmdOrFun = cmd;
-
-	return this.addRule(ruleOptions);
-};
-
-PM.prototype.addRule = function (globs, ruleOptions, cmdOrFun) {
-	var rule;
-	if(ruleOptions instanceof Watcher){
-		rule = arguments[0];
-	}else{
-		rule = Watcher.apply(null, arguments);
-		if (this.getOption("debug")) {
-			if (typeof(rule.options().cmdOrFun) === "function") {
-				var ruleOptionsCopy = JSON.parse(JSON.stringify(rule.options()));
-				ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
-			}
-			debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
-		}
-		rule.id = ruleId();
-	}
-
-	rule._watcher = this;
-	this._rules.push(rule);
-	return rule;
-};
-
-PM.prototype.rules = function () {
-	return this._rules;
-};
-
-PM.prototype.getRuleById = function (id) {
-	return this._rules.find(function (rule) {
-		return rule.id === id;
-	});
-};
-
-PM.prototype.getRuleByIndex = function (index) {
-	return this._rules[index];
-};
-
-PM.prototype.startById = function (id) {
-	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't start rule with id=" + id + ", there is no such rule" }
-	}
-
-	rule.start();
-};
-
-PM.prototype.restartById = function (id) {
-	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't restart rule with id=" + id + ", there is no such rule" }
-	}
-
-	rule.restart();
-};
-
-PM.prototype.stopById = function (id) {
-	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't stop rule with id=" + id + ", there is no such rule" }
-	}
-
-	rule.stop();
-};
-
-PM.prototype.deleteById = function (id) {
-	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't delete rule with id=" + id + ", there is no such rule" }
-	}
-
-	rule.delete();
-};
-
-PM.prototype.startAll = function () {
-	this._rules.forEach(function (rule) {
-		rule.start();
-	});
-};
-
-PM.prototype.stopAll = function () {
-	this._rules.forEach(function (rule) {
-		rule.stop();
-	});
-};
-
-module.exports.PM = PM;
-module.exports.Watcher = Watcher;
+module.exports = Watcher;
