@@ -1,23 +1,26 @@
 var child = require("child_process");
 
 var program = require("commander");
-var WebSocketClient = require('ws');
 var chalk = require("chalk");
 var TerminalTable = require('cli-table');
 
 var utils = require("./utils");
 var debugLog = utils.debugLog;
+var genUID = utils.genUID;
 var assign = utils.assign;
+var terminate = require("./terminate");
+
+var WSTransport = require("../ide/client/ws-transport");
 
 var defaultPort = 9876;
 
 var daemonSpawned = false;
-var ws;
 function spawnDaemon() {
+	console.log("Spawning daemon...");
 	if (program.debug) {
 		debugLog(chalk.green("Run"), "daemon on port", program.port);
 	}
-	var daemon = child.spawn("node daemon.js --port " + program.port, { shell: true, detached: true, stdio: "inherit" });
+	var daemon = child.spawn("node pm-daemon.js --port " + program.port, { shell: true, detached: true, stdio: "inherit" });
 	daemon.unref();
 	daemonSpawned = true;
 }
@@ -27,101 +30,51 @@ function connectToDaemon(onOpen) {
 	if (program.debug) {
 		debugLog(chalk.green("Connect"), "to daemon on port", program.port);
 	}
-	ws = new WebSocketClient('ws://localhost:'+program.port+'/ws');
-
-	ws.on("open", function () {
-		onOpen(createProxyWatcher());
-	}).on("error", function() {
-		if (daemonSpawned) {
-			setTimeout(connectToDaemon.bind(null, onOpen), 100);
-		} else {
+	var pm = WSTransport.create({
+		port: program.port
+	});
+	pm.once("apiInitialized", function () {
+		onOpen(pm);
+	});
+	pm.once("error", function () {
+		if (!daemonSpawned) {
 			spawnDaemon();
-			setTimeout(connectToDaemon.bind(null, onOpen), 100);
 		}
 	});
+	pm.connect();
 }
 
-function send(obj) {
-	// copy object to prevent changes between timeouts
-	var jsonStr = typeof(obj) == "string" ? obj : JSON.stringify(obj);
-	if (program.debug) {
-		debugLog(chalk.green("Send"), jsonStr);
-	}
-	ws.send(jsonStr, function () {});
-}
+function connectOrKill() {
+	program.port = program.port || defaultPort;
 
-function sendResult(obj, callback) {
-	// copy object to prevent changes between timeouts
-	var jsonStr = typeof(obj) == "string" ? obj : JSON.stringify(obj);
-	if (program.debug) {
-		debugLog(chalk.green("Send"), jsonStr);
-	}
-	ws.on("message", function (rawMessage) {
-		var message = JSON.parse(rawMessage);
-		callback(message.err, message.result);
+	var pm = WSTransport.create({ port: program.port});
+	pm.once("apiInitialized", function () {
+		pm.getPid(function (err, pid) {
+			pm.disconnect();
+			terminate(pid, {}, function (err) {
+				process.exit(0);
+			});
+		});
 	});
-	ws.send(jsonStr, function () {});
-}
-
-function createProxyWatcher() {
-	var target = {
-		__calls: [],
-		send: function () {
-			send({ eval: "pm." + this.__calls.map(function (c) { return c.name + "(" + c.args.map(JSON.stringify.bind(JSON)).join(", ") + ")"; }).join(".") });
-			this.__calls = [];
-			return proxy;
-		},
-		sendResult: function (callback) {
-			sendResult({ evalResult: "pm." + this.__calls.map(function (c) { return c.name + "(" + c.args.map(JSON.stringify.bind(JSON)).join(", ") + ")"; }).join(".") }, callback);
-			this.__calls = [];
-			return proxy;
-		},
-		close: function () {
-			ws.close();
-		}
-	};
-	var proxy = new Proxy(target, {
-		get: function (target, name) {
-			if (name in target || name === 'constructor') {
-				return target[name];
-			} else {
-				return function() {
-					target.__calls.push({ name: name, args: Array.prototype.slice.call(arguments) });
-					return proxy;
-				}
-			}
-		}
+	pm.once("error", function () {
+		process.exit(0);
 	});
-	return proxy;
+	pm.connect();
 }
 
 function logError(err) {
 	console.log(chalk.red("Error:"), chalk.red.bold(err.code), "-", err.message);
 }
 
-var errorCodeToExitCode = {
-	"RULE_NOT_FOUND": 1
-};
-
 program
 	.option("-p --port <port>", "Port to listen/connect to WebSockets")
 	.option("--debug", "Print debug info");
 
 program
-	.command("eval <code>")
-	.description("Eval line of code directly in daemon")
-	.action(function (code) {
-		connectToDaemon(function (pm) {
-			sendResult({ evalResult: code }, function (err, result) {
-				pm.close();
-				if (err) {
-					logError(err);
-					process.exit(errorCodeToExitCode[err.code]);
-				} else {
-					console.log(result);
-				}
-			});
-		});
+	.command("kill-daemon")
+	.description("Kill PM daemon")
+	.action(function () {
+		connectOrKill();
 	});
 
 program
@@ -140,18 +93,21 @@ program
 		if (+cmdOrId == ""+cmdOrId && !options.glob) {
 			// start existing process
 			connectToDaemon(function (pm) {
-				pm.startById(+cmdOrId).sendResult(function (err) {
-					pm.close()
+				pm.startById(+cmdOrId, function (err) {
 					if (err) {
 						logError(err);
 						process.exit(errorCodeToExitCode[err.code]);
 					}
+
+					pm.disconnect();
 				});
 			});
 		} else {
 			// start new process
 			connectToDaemon(function (pm) {
-				pm.addRule({
+				var id = genUID();
+				pm.createRule({
+					id: id,
 					type: options.exec ? "exec" : "restart",
 					globs: options.glob,
 					cmdOrFun: cmdOrId,
@@ -159,12 +115,20 @@ program
 					reglob: options.reglob,
 					restartOnError: options.restartOnError,
 					restartOnSuccess: options.restartOnSuccess
-				}).start().sendResult(function (err) {
-					pm.close()
+				}, function (err) {
 					if (err) {
 						logError(err);
 						process.exit(errorCodeToExitCode[err.code]);
 					}
+
+					pm.startById(id, function (err) {
+						if (err) {
+							logError(err);
+							process.exit(errorCodeToExitCode[err.code]);
+						}
+
+						pm.disconnect();
+					});
 				});
 			});
 		}
@@ -190,12 +154,13 @@ program
 	.option("--plain", "Print in plain text format")
 	.action(function (options) {
 		connectToDaemon(function (pm) {
-			pm.rules().toJSON().sendResult(function (err, result) {
-				pm.close();
+			pm.rules(function (err, result) {
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
 				}
+
+				pm.disconnect();
 
 				if (options.json) {
 					console.log(result);
@@ -227,12 +192,13 @@ program
 	.description("Stop process by id")
 	.action(function (id) {
 		connectToDaemon(function (pm) {
-			pm.stopById(+id).sendResult(function (err, result) {
-				pm.close();
+			pm.stopById(+id, function (err) {
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
 				}
+
+				pm.disconnect();
 			});
 		});
 	});
@@ -242,12 +208,13 @@ program
 	.description("Restart process by id")
 	.action(function (id) {
 		connectToDaemon(function (pm) {
-			pm.restartById(+id).sendResult(function (err, result) {
-				pm.close();
+			pm.restartById(+id, function (err) {
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
 				}
+
+				pm.disconnect();
 			});
 		});
 	});
@@ -257,12 +224,60 @@ program
 	.description("Delete process by id")
 	.action(function (id) {
 		connectToDaemon(function (pm) {
-			pm.deleteById(+id).sendResult(function (err, result) {
-				pm.close();
+			pm.deleteById(+id, function (err) {
+				pm.disconnect();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
 				}
+			});
+		});
+	});
+
+program
+	.command("start-all")
+	.description("Start all processes")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.startAll(function (err) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
+			});
+		});
+	});
+
+program
+	.command("stop-all")
+	.description("Stop all processes")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.stopAll(function (err) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
+			});
+		});
+	});
+
+program
+	.command("restart-all")
+	.description("Restart all processes")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.restartAll(function (err) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
 			});
 		});
 	});

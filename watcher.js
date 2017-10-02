@@ -333,11 +333,8 @@ Watcher.prototype.getOption = function (name) {
 	}
 };
 
-Watcher.prototype.stop = function () {
-	if (this._started) {
-		if (this._childRunning) {
-			this._terminateChild();
-		}
+Watcher.prototype.stop = function (callback) {
+	var afterTerminate = function () {
 		clearInterval(this._reglobInterval);
 		this._reglobInterval = null;
 		Object.keys(this._watchers).forEach(function (p) {
@@ -345,12 +342,28 @@ Watcher.prototype.stop = function () {
 			delete this._watchers[p];
 		}.bind(this));
 		this._started = false;
+
+		if (callback) {
+			callback(null);
+		}
+	}.bind(this);
+
+	if (this._started) {
+		if (this._childRunning) {
+			this._terminateChild(function (err) {
+				afterTerminate();
+			});
+		} else {
+			afterTerminate();
+		}
 	}
 };
 
-Watcher.prototype.restart = function () {
-	this.stop();
-	this.start();
+Watcher.prototype.restart = function (callback) {
+	this.stop(function (err) {
+		this.start();
+		callback(null);
+	}.bind(this));
 };
 
 Watcher.prototype.toJSON = function () {

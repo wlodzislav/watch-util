@@ -1,8 +1,10 @@
 var chalk = require("chalk");
+var async = require("async");
 
 var utils = require("./utils");
 var debugLog = utils.debugLog;
 var genUID = utils.genUID;
+var Watcher = require("./watcher");
 var defaultOptions = require("./default-options");
 
 function rulesToJSON() {
@@ -28,29 +30,29 @@ PM.prototype.getOption = function (name) {
 	});
 };
 
-PM.prototype.addRule = function (/* globs, ruleOptions, cmdOrFun */) {
-	var rule;
-	if(ruleOptions instanceof Watcher){
-		rule = arguments[0];
-	}else{
-		rule = Watcher.apply(null, arguments);
-		if (this.getOption("debug")) {
-			if (typeof(rule.options().cmdOrFun) === "function") {
-				var ruleOptionsCopy = JSON.parse(JSON.stringify(rule.options()));
-				ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
-			}
-			debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
+PM.prototype.createRule = function (ruleOptions, callback) {
+	var rule = new Watcher(ruleOptions);
+	if (this.getOption("debug")) {
+		if (typeof(rule.options().cmdOrFun) === "function") {
+			var ruleOptionsCopy = JSON.parse(JSON.stringify(rule.options()));
+			ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
 		}
-		rule.id = genUID();
+		debugLog(chalk.green(".addRule")+"("+JSON.stringify(ruleOptionsCopy || ruleOptions)+")");
 	}
 
 	rule._pm = this;
 	this._rules.push(rule);
-	return rule;
+
+	if (callback) { return callback(null); }
 };
 
-PM.prototype.rules = function () {
-	return this._rules;
+PM.prototype.rules = function (callback) {
+	if (callback) {
+		var serializedRules = this._rules.map(function (rule) { return rule.toJSON(); });
+		callback(null, serializedRules);
+	} else {
+		return this._rules;
+	}
 };
 
 PM.prototype.getRuleById = function (id) {
@@ -59,52 +61,59 @@ PM.prototype.getRuleById = function (id) {
 	});
 };
 
-PM.prototype.startById = function (id) {
+PM.prototype.startById = function (id, callback) {
 	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't start rule with id=" + id + ", there is no such rule" }
-	}
-
+	console.log(id);
 	rule.start();
+	if (callback) { return callback(null); }
 };
 
-PM.prototype.restartById = function (id) {
+PM.prototype.restartById = function (id, callback) {
 	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't restart rule with id=" + id + ", there is no such rule" }
-	}
-
-	rule.restart();
+	rule.restart(function (err) {
+		if (callback) { return callback(null); }
+	});
 };
 
-PM.prototype.stopById = function (id) {
+PM.prototype.stopById = function (id, callback) {
 	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't stop rule with id=" + id + ", there is no such rule" }
-	}
-
-	rule.stop();
+	rule.stop(function (err) {
+		if (callback) { return callback(null); }
+	});
 };
 
-PM.prototype.deleteById = function (id) {
+PM.prototype.deleteById = function (id, callback) {
 	var rule = this.getRuleById(id);
-	if (!rule) {
-		throw { code: "RULE_NOT_FOUND", id: id, message: "Can't delete rule with id=" + id + ", there is no such rule" }
-	}
+	rule.stop(function (err) {
+		var index = this._rules.indexOf(rule);
+		this._rules.splice(index, 1);
 
-	rule.delete();
+		if (callback) { return callback(null); }
+	});
 };
 
-PM.prototype.startAll = function () {
+PM.prototype.startAll = function (callback) {
 	this._rules.forEach(function (rule) {
 		rule.start();
 	});
+
+	if (callback) { return callback(null); }
 };
 
-PM.prototype.stopAll = function () {
-	this._rules.forEach(function (rule) {
-		rule.stop();
-	});
+PM.prototype.stopAll = function (callback) {
+	async.forEach(this._rules, function (rule, callback) {
+		rule.stop(callback)
+	}, function (err) {
+		if (callback) { return callback(null); }
+	})
+};
+
+PM.prototype.restartAll = function (callback) {
+	async.forEach(this._rules, function (rule, callback) {
+		rule.restart(callback)
+	}, function (err) {
+		if (callback) { return callback(null); }
+	})
 };
 
 module.exports = PM;
