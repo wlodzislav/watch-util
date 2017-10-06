@@ -6,9 +6,7 @@ module.exports = {
 	restartOnSuccess: false, // restart if exit code == 0
 	shell: true, // use this shell for running cmds, or default shell(true)
 	//cwd: "path for resolving",
-	//persistLog: true, // save logs in files
-	//logDir: "./logs",
-	//logRotation: "5h", // s,m,h,d,M
+	maxLogEntries: 100,
 	writeToConsole: true, // write logs to console
 	mtimeCheck: true,
 	debug: false,

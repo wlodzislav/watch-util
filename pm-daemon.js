@@ -20,11 +20,16 @@ var api = {
 	createRule: pm.createRule.bind(pm),
 	startById: pm.startById.bind(pm),
 	stopById: pm.stopById.bind(pm),
+	pauseById: pm.pauseById.bind(pm),
+	getLogById: pm.getLogById.bind(pm),
 	deleteById: pm.deleteById.bind(pm),
 	startAll: pm.startAll.bind(pm),
 	stopAll: pm.stopAll.bind(pm),
 	restartAll: pm.restartAll.bind(pm),
+	pauseAllRunning: pm.pauseAllRunning.bind(pm),
+	startAllPaused: pm.startAllPaused.bind(pm),
 	rules: pm.rules.bind(pm),
+	logs: pm.logs.bind(pm),
 	getPid: function (callback) {
 		callback(null, process.pid);
 	}

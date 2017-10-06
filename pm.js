@@ -13,13 +13,20 @@ function rulesToJSON() {
 	});
 }
 
-function PM(globalOptions) {
-	if (!(this instanceof PM)) { return new PM(globalOptions); }
+function PM(options) {
+	if (!(this instanceof PM)) { return new PM(options); }
+	options = options || {};
 
-	this._globalOptions = globalOptions || {};
+	this._globalOptions = options.globalOptions || {};
 	this._rules = [];
-
 	this._rules.toJSON = rulesToJSON;
+
+	if (options.rules) {
+		options.rules.forEach(function (r) {
+			this.createRule(r);
+		}.bind(this));
+	}
+
 	this._ruleId = 0;
 	this._watcherId = 0;
 }
@@ -46,6 +53,20 @@ PM.prototype.createRule = function (ruleOptions, callback) {
 	if (callback) { return callback(null); }
 };
 
+PM.prototype.overwriteRule = function (ruleOptions, callback) {
+	var rule = this.getRuleById(ruleOptions.id);
+	if (rule) {
+		rule.update(ruleOptions, callback);
+	} else {
+		this.createRule(ruleOptions, callback);
+	}
+};
+
+PM.prototype.patchRuleById = function (ruleId, ruleOptions, callback) {
+	var rule = this.getRuleById(ruleId);
+	rule.patch(ruleOptions, callback);
+};
+
 PM.prototype.rules = function (callback) {
 	if (callback) {
 		var serializedRules = this._rules.map(function (rule) { return rule.toJSON(); });
@@ -55,17 +76,40 @@ PM.prototype.rules = function (callback) {
 	}
 };
 
+PM.prototype.logs = function (callback) {
+	var logs = {};
+	this._rules.forEach(function (rule) {
+		logs[rule.id] = rule.getLog();
+	});
+	if (callback) {
+		callback(null, logs);
+	} else {
+		return logs;
+	}
+};
+
+PM.prototype.toJSON = function () {
+	return {
+		rules: this._rules.map(function (rule) { return rule.toJSON(); })
+	};
+};
+
 PM.prototype.getRuleById = function (id) {
 	return this._rules.find(function (rule) {
-		return rule.id === id;
+		// generated ids are numbers, but parsed cmd args are strings
+		return rule.id == id;
 	});
+};
+
+PM.prototype.getLogById = function (id, callback) {
+	var rule = this.getRuleById(id);
+	var log = rule.getLog();
+	callback(null, log);
 };
 
 PM.prototype.startById = function (id, callback) {
 	var rule = this.getRuleById(id);
-	console.log(id);
-	rule.start();
-	if (callback) { return callback(null); }
+	rule.start(callback);
 };
 
 PM.prototype.restartById = function (id, callback) {
@@ -82,14 +126,27 @@ PM.prototype.stopById = function (id, callback) {
 	});
 };
 
+PM.prototype.pauseById = function (id, callback) {
+	var rule = this.getRuleById(id);
+	rule.pause(function (err) {
+		if (callback) { return callback(null); }
+	});
+};
+
 PM.prototype.deleteById = function (id, callback) {
 	var rule = this.getRuleById(id);
-	rule.stop(function (err) {
-		var index = this._rules.indexOf(rule);
+	var index = this._rules.indexOf(rule);
+	if (rule.runState === "running") {
+		rule.stop(function (err) {
+			this._rules.splice(index, 1);
+
+			if (callback) { return callback(null); }
+		}.bind(this));
+	} else {
 		this._rules.splice(index, 1);
 
 		if (callback) { return callback(null); }
-	});
+	}
 };
 
 PM.prototype.startAll = function (callback) {
@@ -114,6 +171,30 @@ PM.prototype.restartAll = function (callback) {
 	}, function (err) {
 		if (callback) { return callback(null); }
 	})
+};
+
+PM.prototype.pauseAllRunning = function (callback) {
+	async.forEach(this._rules, function (rule, callback) {
+		if (rule.isRunning()) {
+			rule.pause(callback);
+		} else {
+			callback(null);
+		}
+	}, function (err) {
+		if (callback) { return callback(null); }
+	});
+};
+
+PM.prototype.startAllPaused = function (callback) {
+	async.forEach(this._rules, function (rule, callback) {
+		if (rule.isPaused()) {
+			rule.start(callback);
+		} else {
+			callback(null);
+		}
+	}, function (err) {
+		if (callback) { return callback(null); }
+	});
 };
 
 module.exports = PM;

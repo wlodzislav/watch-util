@@ -35,16 +35,16 @@ function exec(cmd, options) {
 			}
 
 			if (isShAvailableOnWin) {
-				var childRunning = child.spawn("/bin/sh", ["-c", cmd], { stdio: options.writeToConsole ? "inherit" : null });
+				var childRunning = child.spawn("/bin/sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
 			} else {
-				var childRunning = child.spawn(cmd, { shell: true, stdio: options.writeToConsole ? "inherit" : null });
+				var childRunning = child.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
 			}
 		} else {
-			var childRunning = child.spawn(cmd, { shell: true, stdio: options.writeToConsole ? "inherit" : null });
+			var childRunning = child.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
 		}
 	} else if (typeof(options.shell) === "string") {
 		var shellExecutable = options.shell.split(" ")[0];
-		var childRunning = child.spawn(shellExecutable, options.shell.split(" ").slice(1).concat([cmd]), { stdio: options.writeToConsole ? "inherit" : null });
+		var childRunning = child.spawn(shellExecutable, options.shell.split(" ").slice(1).concat([cmd]), { stdio: ["ignore", "pipe", "pipe"] });
 	}
 
 	return childRunning;
@@ -120,80 +120,81 @@ function Watcher(globs, ruleOptions, cmdOrFun) {
 	this.id = this._ruleOptions.id || genUID();
 
 	if (!this._ruleOptions.type) {
-		this._ruleOptions.type = "restart";
+		this._ruleOptions.type = "reload";
 	}
 	if (typeof cmdOrFun === "function") {
 		this._ruleOptions.type = "exec";
 	}
+
+	this._runState = ruleOptions.runState || "stopped"
+	if (this._runState === "running") {
+		this._runState = "paused"
+	}
+
+	this._log = [];
 }
 
-Watcher.prototype._runRestartingChild = function () {
-	if (this.getOption("debug")) {
-		debugLog(chalk.green("Run"), this._ruleOptions.cmdOrFun.toString());
-	}
-
-	this._childRunning = exec(this._ruleOptions.cmdOrFun, {
-		writeToConsole: this.getOption("writeToConsole"),
-		shell: this.getOption("shell"),
-		debug: this.getOption("debug")
-	});
-	var childRunning = this._childRunning;
-	this._childRunning.on("exit", function (code) {
-		if (!(childRunning.killed || code === null)) { // not killed
-			this._childRunning = null;
-			if (this.getOption("restartOnSuccess") && code === 0) {
-				this._runRestartingChild();
-			}
-			if (this.getOption("restartOnError") && code !== 0) {
-				this._runRestartingChild();
-			}
-		} else {
-			this._childRunning = null;
-		}
-	}.bind(this));
+Watcher.prototype.isRunning = function () {
+	return this._runState === "running";
 };
 
-Watcher.prototype._terminateChild = function (callback) {
-	if(!this._isTerminating) {
-		if (this.getOption("debug")) {
-			debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
-		}
-		this._isTerminating = true;
-		terminate(this._childRunning.pid, {
-			signal: this.getOption("killSignal"),
-			checkInterval: this.getOption("killCheckInterval"),
-			retryInterval: this.getOption("killRetryInterval"),
-			retryCount: this.getOption("killRetryCount"),
-			timeout: this.getOption("killTimeout"),
-		}, function (err) {
-			if (err) {
-				console.log(err);
-				process.exit(1);
-			}
-			this._childRunning = null;
-			this._isTerminating = false;
-			if (callback) { callback(); }
-		}.bind(this));
-	}
+Watcher.prototype.isStopped = function () {
+	return this._runState === "stopped";
 };
 
-Watcher.prototype._restartChild = function () {
-	if (this._childRunning) {
-		this._terminateChild(function (err) {
-			if(err){
-				debugLog(chalk.red("Terminating error:"), err.message);
-				process.exit(1);
-			}
-			this._runRestartingChild();
-		}.bind(this));
+Watcher.prototype.isPaused = function () {
+	return this._runState === "paused";
+};
+
+Watcher.prototype.getLog = function () {
+	return this._log;
+};
+
+Watcher.prototype._writeLog = function (entry) {
+	var max = this.getOption("maxLogEntries");
+	if (this._log.length >= max) {
+		this._log.splice(0, 1);
+	}
+	entry.date = Date.now();
+	this._log.push(entry);
+};
+
+Watcher.prototype.update = function (ruleOptions, callback) {
+	this._ruleOptions = ruleOptions;
+	this.restart(callback);
+};
+
+Watcher.prototype.patch = function (ruleOptions, callback) {
+	for (var key in ruleOptions) {
+		this._ruleOptions[key] = ruleOptions[key];
+	}
+	this.restart(callback);
+};
+
+Watcher.prototype.options = function () {
+	return this._ruleOptions;
+};
+
+Watcher.prototype.getOption = function (name) {
+	if (this._pm) {
+		return [this._ruleOptions[name], this._pm._globalOptions[name], defaultOptions[name]].find(function (v) {
+			return v != null;
+		});
 	} else {
-		this._runRestartingChild();
+		return [this._ruleOptions[name], defaultOptions[name]].find(function (v) {
+			return v != null;
+		});
 	}
 };
 
-Watcher.prototype.start = function () {
-	if (this._started) {
-		throw new Error("Process already started");
+Watcher.prototype.start = function (callback) {
+	if (this._runState === "running") {
+		var err = new Error("Process already started");
+		if (callback) {
+			return callback(err);
+		} else {
+			throw err;
+		}
 	}
 	this._watchers = {};
 
@@ -204,29 +205,9 @@ Watcher.prototype.start = function () {
 			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 				this._ruleOptions.cmdOrFun(filePath, action);
 			} else {
-				var cwd = path.resolve(".")
-				var relFile = filePath;
-				var file = path.resolve(filePath);
-				var relDir = path.dirname(filePath);
-				var dir = path.resolve(path.dirname(filePath));
-				var cmd = this._ruleOptions.cmdOrFun
-					.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "cwd", "g"), cwd)
-					.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "relfile", "g"), relFile)
-					.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "file", "g"), file)
-					.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "reldir", "g"), relDir)
-					.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "dir", "g"), dir)
-					.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "action", "g"), action);
-
-				this._childRunning = exec(cmd, {
-					writeToConsole: this.getOption("writeToConsole"),
-					shell: this.getOption("shell"),
-					debug: this.getOption("debug")
-				});
-				this._childRunning.on("exit", function () {
-					this._childRunning = null;
-				}.bind(this));
+				this._execChild(filePath, action);
 			}
-		} else if (this._ruleOptions.type === "restart") {
+		} else if (this._ruleOptions.type === "reload") {
 			this._restartChild();
 		}
 	}.bind(this), this.getOption("debounce"));
@@ -304,7 +285,7 @@ Watcher.prototype.start = function () {
 			}
 		}.bind(this));
 
-		if (firstTime && this._ruleOptions.type === "restart") {
+		if (firstTime && this._ruleOptions.type === "reload") {
 			this._restartChild();
 		}
 		firstTime = false;
@@ -312,24 +293,12 @@ Watcher.prototype.start = function () {
 
 	reglob();
 
-	this._started = true;
+	this._runState = "running";
 	this._reglobInterval = setInterval(reglob, this.getOption("reglob"));
-	return this;
-};
-
-Watcher.prototype.options = function () {
-	return this._ruleOptions;
-}
-
-Watcher.prototype.getOption = function (name) {
-	if (this._pm) {
-		return [this._ruleOptions[name], this._pm._globalOptions[name], defaultOptions[name]].find(function (v) {
-			return v != null;
-		});
+	if (callback) {
+		return callback(null);
 	} else {
-		return [this._ruleOptions[name], defaultOptions[name]].find(function (v) {
-			return v != null;
-		});
+		return this;
 	}
 };
 
@@ -341,14 +310,12 @@ Watcher.prototype.stop = function (callback) {
 			this._watchers[p].close();
 			delete this._watchers[p];
 		}.bind(this));
-		this._started = false;
+		this._runState = "stopped";
 
-		if (callback) {
-			callback(null);
-		}
+		if (callback) { return callback(null); }
 	}.bind(this);
 
-	if (this._started) {
+	if (this._runState === "running") {
 		if (this._childRunning) {
 			this._terminateChild(function (err) {
 				afterTerminate();
@@ -362,7 +329,14 @@ Watcher.prototype.stop = function (callback) {
 Watcher.prototype.restart = function (callback) {
 	this.stop(function (err) {
 		this.start();
-		callback(null);
+		if (callback) { return callback(null); }
+	}.bind(this));
+};
+
+Watcher.prototype.pause = function (callback) {
+	this.stop(function (err) {
+		this._runState = "paused";
+		if (callback) { return callback(null); }
 	}.bind(this));
 };
 
@@ -371,10 +345,119 @@ Watcher.prototype.toJSON = function () {
 	if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 		ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
 	}
-	ruleOptionsCopy.started = this._started;
+	ruleOptionsCopy.runState = this._runState;
 	ruleOptionsCopy.id = this.id;
 	return ruleOptionsCopy;
 };
 
+Watcher.prototype._terminateChild = function (callback) {
+	if(!this._isTerminating) {
+		if (this.getOption("debug")) {
+			debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+		}
+		this._isTerminating = true;
+		terminate(this._childRunning.pid, {
+			signal: this.getOption("killSignal"),
+			checkInterval: this.getOption("killCheckInterval"),
+			retryInterval: this.getOption("killRetryInterval"),
+			retryCount: this.getOption("killRetryCount"),
+			timeout: this.getOption("killTimeout"),
+		}, function (err) {
+			if (err) {
+				console.log(err);
+				process.exit(1);
+			}
+			this._childRunning = null;
+			this._isTerminating = false;
+			if (callback) { callback(); }
+		}.bind(this));
+	}
+};
+
+Watcher.prototype._execChild = function (filePath, action) {
+	var cwd = path.resolve(".")
+	var relFile = filePath;
+	var file = path.resolve(filePath);
+	var relDir = path.dirname(filePath);
+	var dir = path.resolve(path.dirname(filePath));
+	var cmd = this._ruleOptions.cmdOrFun
+		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "cwd", "g"), cwd)
+		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "relfile", "g"), relFile)
+		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "file", "g"), file)
+		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "reldir", "g"), relDir)
+		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "dir", "g"), dir)
+		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "action", "g"), action);
+
+	this._childRunning = exec(cmd, {
+		writeToConsole: this.getOption("writeToConsole"),
+		shell: this.getOption("shell"),
+		debug: this.getOption("debug")
+	});
+
+	this._childRunning.stdout.on("data", function (buffer) {
+		var text = buffer.toString();
+		this._writeLog({ stream: "stdout", text: text });
+	}.bind(this));
+
+	this._childRunning.stderr.on("data", function (buffer) {
+		var text = buffer.toString();
+		this._writeLog({ stream: "stderr", text: text });
+	}.bind(this));
+
+	this._childRunning.on("exit", function () {
+		this._childRunning = null;
+	}.bind(this));
+};
+
+Watcher.prototype._runRestartingChild = function () {
+	if (this.getOption("debug")) {
+		debugLog(chalk.green("Run"), this._ruleOptions.cmdOrFun.toString());
+	}
+
+	this._childRunning = exec(this._ruleOptions.cmdOrFun, {
+		writeToConsole: this.getOption("writeToConsole"),
+		shell: this.getOption("shell"),
+		debug: this.getOption("debug")
+	});
+	var childRunning = this._childRunning;
+
+	this._childRunning.stdout.on("data", function (buffer) {
+		var text = buffer.toString();
+		this._writeLog({ stream: "stdout", text: text });
+	}.bind(this));
+
+	this._childRunning.stderr.on("data", function (buffer) {
+		var text = buffer.toString();
+		this._writeLog({ stream: "stderr", text: text });
+	}.bind(this));
+
+	this._childRunning.on("exit", function (code) {
+		if (!(childRunning.killed || code === null)) { // not killed
+			this._childRunning = null;
+			if (this.getOption("restartOnSuccess") && code === 0) {
+				this._runRestartingChild();
+			}
+			if (this.getOption("restartOnError") && code !== 0) {
+				this._runRestartingChild();
+			}
+		} else {
+			this._childRunning = null;
+		}
+	}.bind(this));
+};
+
+Watcher.prototype._restartChild = function () {
+	if (this._childRunning) {
+		this._terminateChild(function (err) {
+			if(err){
+				debugLog(chalk.red("Terminating error:"), err.message);
+				process.exit(1);
+			}
+			this._runRestartingChild();
+		}.bind(this));
+	} else {
+		this._runRestartingChild();
+	}
+};
 
 module.exports = Watcher;

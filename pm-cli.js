@@ -3,6 +3,7 @@ var child = require("child_process");
 var program = require("commander");
 var chalk = require("chalk");
 var TerminalTable = require('cli-table');
+var moment = require("moment");
 
 var utils = require("./utils");
 var debugLog = utils.debugLog;
@@ -78,60 +79,61 @@ program
 	});
 
 program
-	.command("start <cmdOrId...>")
+	.command("create <cmd...>")
 	.description("Create and start process or start existing one by id")
+	.option("--id <id>", "Set rule id")
 	.option("-e --exec", "Execute comand on changes, not reload")
 	.option("-g --glob <patterns>", "Patterns to watch, separated by comma, ignore pattern starts with '!', for exact pattern syntax see: https://github.com/isaacs/node-glob")
 	.option("-d --debounce <ms>", "Debounce exec/reload by ms, used for editors like vim that mv then rm files for crash safety")
 	.option("-G --reglob <ms>", "Reglob interval to track new added files, on ms")
 	.option("--no-restart-on-error", "Don't restart cmd if cmd crashes or exited with non 0 status")
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
-	.action(function (cmdOrId, options) {
-		if (Array.isArray(cmdOrId)) {
-			cmdOrId = cmdOrId.join(" ");
+	.action(function (cmd, options) {
+		if (Array.isArray(cmd)) {
+			cmd = cmd.join(" ");
 		}
-		if (+cmdOrId == ""+cmdOrId && !options.glob) {
-			// start existing process
-			connectToDaemon(function (pm) {
-				pm.startById(+cmdOrId, function (err) {
-					if (err) {
-						logError(err);
-						process.exit(errorCodeToExitCode[err.code]);
-					}
+		connectToDaemon(function (pm) {
+			var id = options.id || genUID();
+			pm.createRule({
+				id: id,
+				type: options.exec ? "exec" : "restart",
+				globs: options.glob,
+				cmdOrFun: cmd,
+				debounce: options.debounce,
+				reglob: options.reglob,
+				restartOnError: options.restartOnError,
+				restartOnSuccess: options.restartOnSuccess
+			}, function (err) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
 
+				pm.startById(id, function (err) {
 					pm.disconnect();
-				});
-			});
-		} else {
-			// start new process
-			connectToDaemon(function (pm) {
-				var id = genUID();
-				pm.createRule({
-					id: id,
-					type: options.exec ? "exec" : "restart",
-					globs: options.glob,
-					cmdOrFun: cmdOrId,
-					debounce: options.debounce,
-					reglob: options.reglob,
-					restartOnError: options.restartOnError,
-					restartOnSuccess: options.restartOnSuccess
-				}, function (err) {
+
 					if (err) {
 						logError(err);
 						process.exit(errorCodeToExitCode[err.code]);
 					}
-
-					pm.startById(id, function (err) {
-						if (err) {
-							logError(err);
-							process.exit(errorCodeToExitCode[err.code]);
-						}
-
-						pm.disconnect();
-					});
 				});
 			});
-		}
+		});
+	});
+
+program
+	.command("start <id...>")
+	.description("Start existing process by id")
+	.action(function (id, options) {
+		connectToDaemon(function (pm) {
+			pm.startById(id, function (err) {
+				pm.disconnect();
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+			});
+		});
 	});
 
 var plainTableOptions = {
@@ -176,7 +178,7 @@ program
 						table.push([
 							row.id,
 							row.type,
-							options.plain ? (row.started ? "started" : "stopped") : (row.started ? chalk.green("started") : chalk.red("stopped")),
+							options.plain ? row.runState : (row.runState === "running" ? chalk.green("running") : chalk.red(row.runState)),
 							options.plain ? row.globs : chalk.grey(row.globs),
 							row.cmdOrFun
 						]);
@@ -192,7 +194,7 @@ program
 	.description("Stop process by id")
 	.action(function (id) {
 		connectToDaemon(function (pm) {
-			pm.stopById(+id, function (err) {
+			pm.stopById(id, function (err) {
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
@@ -208,7 +210,7 @@ program
 	.description("Restart process by id")
 	.action(function (id) {
 		connectToDaemon(function (pm) {
-			pm.restartById(+id, function (err) {
+			pm.restartById(id, function (err) {
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
@@ -224,12 +226,89 @@ program
 	.description("Delete process by id")
 	.action(function (id) {
 		connectToDaemon(function (pm) {
-			pm.deleteById(+id, function (err) {
+			pm.deleteById(id, function (err) {
 				pm.disconnect();
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
 				}
+			});
+		});
+	});
+
+program
+	.command("pause <id>")
+	.description("Pause process by id")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.pauseById(id, function (err) {
+				pm.disconnect();
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+			});
+		});
+	});
+
+program
+	.command("logs")
+	.description("Show logs for all processes")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.logs(function (err, logs) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
+
+				var flatLog = [];
+				Object.keys(logs).forEach(function (id) {
+					logs[id].forEach(function (entry) {
+						entry._id = id;
+						flatLog.push(entry);
+					});
+				});
+
+				flatLog.sort(function (a, b) {
+					return a.date - b.date;
+				});
+
+				flatLog.forEach(function (entry) {
+					var formattedDate = moment(entry.date).format("HH:mm:ss");
+					var text = entry.text.replace(/\n$/, "");
+					if (entry.stream === "stderr") {
+						text = chalk.red(text);
+					}
+
+					console.log(formattedDate + " " + chalk.green(entry._id) + ": " + text);
+				});
+			});
+		});
+	});
+program
+	.command("log <id>")
+	.description("Show log for process with id")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.getLogById(id, function (err, log) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
+
+				log.forEach(function (entry) {
+					var text = entry.text.replace(/\n$/, "");
+					if (entry.stream === "stderr") {
+						text = chalk.red(text);
+					}
+
+					console.log(formattedDate + ": " + text);
+				});
 			});
 		});
 	});
@@ -272,6 +351,38 @@ program
 	.action(function (id) {
 		connectToDaemon(function (pm) {
 			pm.restartAll(function (err) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
+			});
+		});
+	});
+
+program
+	.command("pause-all-running")
+	.description("Pause all running")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.pauseAllRunning(function (err) {
+				if (err) {
+					logError(err);
+					process.exit(errorCodeToExitCode[err.code]);
+				}
+
+				pm.disconnect();
+			});
+		});
+	});
+
+program
+	.command("start-all-paused")
+	.description("Start all paused")
+	.action(function (id) {
+		connectToDaemon(function (pm) {
+			pm.startAllPaused(function (err) {
 				if (err) {
 					logError(err);
 					process.exit(errorCodeToExitCode[err.code]);
