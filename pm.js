@@ -1,3 +1,5 @@
+var EventEmitter = require('events');
+
 var chalk = require("chalk");
 var async = require("async");
 
@@ -27,8 +29,8 @@ function PM(options) {
 		}.bind(this));
 	}
 
-	this._ruleId = 0;
-	this._watcherId = 0;
+	this.ee = new EventEmitter();
+	this.on = this.ee.on.bind(this.ee);
 }
 
 PM.prototype.getOption = function (name) {
@@ -49,6 +51,10 @@ PM.prototype.createRule = function (ruleOptions, callback) {
 
 	rule._pm = this;
 	this._rules.push(rule);
+	rule.on("log", function (entry) {
+		entry._id = rule.id;
+		this.ee.emit("log", entry);
+	}.bind(this));
 
 	if (callback) { return callback(null); }
 };
@@ -136,7 +142,7 @@ PM.prototype.pauseById = function (id, callback) {
 PM.prototype.deleteById = function (id, callback) {
 	var rule = this.getRuleById(id);
 	var index = this._rules.indexOf(rule);
-	if (rule.runState === "running") {
+	if (rule._runState === "running") {
 		rule.stop(function (err) {
 			this._rules.splice(index, 1);
 

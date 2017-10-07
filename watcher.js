@@ -1,6 +1,7 @@
 var fs = require("fs");
 var path = require("path");
 var child = require('child_process');
+var EventEmitter = require('events');
 
 var glob = require("glob");
 var chalk = require("chalk");
@@ -132,6 +133,9 @@ function Watcher(globs, ruleOptions, cmdOrFun) {
 	}
 
 	this._log = [];
+
+	this.ee = new EventEmitter();
+	this.on = this.ee.on.bind(this.ee);
 }
 
 Watcher.prototype.isRunning = function () {
@@ -157,6 +161,7 @@ Watcher.prototype._writeLog = function (entry) {
 	}
 	entry.date = Date.now();
 	this._log.push(entry);
+	this.ee.emit("log", entry);
 };
 
 Watcher.prototype.update = function (ruleOptions, callback) {
