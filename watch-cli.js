@@ -33,7 +33,7 @@ if (program.exec) {
 	program.type = "exec";
 }
 
-if (program.action) {
+if (program.action.length) {
 	program.actions = program.action;
 }
 

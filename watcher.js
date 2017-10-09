@@ -385,18 +385,26 @@ Watcher.prototype._terminateChild = function (callback) {
 };
 
 Watcher.prototype._execChild = function (filePath, action) {
-	var cwd = path.resolve(".")
-	var relFile = filePath;
-	var file = path.resolve(filePath);
-	var relDir = path.dirname(filePath);
-	var dir = path.resolve(path.dirname(filePath));
-	var cmd = this._ruleOptions.cmdOrFun
-		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "cwd", "g"), cwd)
-		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "relfile", "g"), relFile)
-		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "file", "g"), file)
-		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "reldir", "g"), relDir)
-		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "dir", "g"), dir)
-		.replace(new RegExp("\\" + this.getOption("execVariablePrefix") + "action", "g"), action);
+	var cmd;
+	if (this._ruleOptions.cmdOrFun.indexOf("${") !== -1) {
+		var cwd = path.resolve(".")
+		var relFile = filePath;
+		var file = path.resolve(filePath);
+		var relDir = path.dirname(filePath);
+		var dir = path.resolve(path.dirname(filePath));
+		var body = "var cwd = \"" + cwd + "\";"
+			+ "var relFile = \"" +relFile + "\";"
+			+ "var file = \"" + file + "\";"
+			+ "var relDir = \"" + relDir + "\";"
+			+ "var dir = \"" + dir + "\";"
+			+ "var action = \"" + action + "\";"
+			+ "return `" + this._ruleOptions.cmdOrFun + "`;";
+		var func = new Function(body);
+		var cmd = func();
+	} else {
+		cmd = this._ruleOptions.cmdOrFun;
+	}
+	console.log("cmd", cmd);
 
 	this._childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
