@@ -18,6 +18,7 @@ program
 	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
 	.option("-p --exec-variable-prefix <prefix>", "Prefix for built-in variables interpolation in exec command")
 	.option("-a, --action <action>", "Exec cmd only for specified action, arg may be used multiple times to specify multiple actions, possible values: create, change, delete", reducer, [])
+	.option("--run-separate", "Run cmd separately for each changed file")
 	.option("--debug", "Print debug info");
 
 program.on('--help', function(){

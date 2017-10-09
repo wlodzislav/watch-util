@@ -4,6 +4,7 @@ module.exports = {
 	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
 	actions: ["create", "change", "delete"],
+	runSeparate: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
 	shell: true, // use this shell for running cmds, or default shell(true)
 	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
 	writeToConsole: false, // write logs to console

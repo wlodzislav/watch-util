@@ -205,17 +205,48 @@ Watcher.prototype.start = function (callback) {
 
 	this._childRunning = null;
 	var firstTime = true;
-	var execCallback = debounce(function (action, filePath) {
+	var changed = {};
+	var execCallback = function (action, filePath) {
 		var actions = this.getOption("actions");
-		if (actions.indexOf(action) === -1) {
-			return;
+		if (actions.indexOf(action) !== -1) {
+			changed[filePath] = { action: action, filePath: filePath };
+			execCallbackDebounce();
 		}
+	}.bind(this);
 
+	var execCallbackDebounce = debounce(function () {
 		if (this._ruleOptions.type === "exec") {
 			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
-				this._ruleOptions.cmdOrFun(filePath, action);
+				if (this.getOption("runSeparate")) {
+					Object.keys(changed).forEach(function (fileName) {
+						var action = changed[fileName].action;
+						this._ruleOptions.cmdOrFun(fileName, action);
+					}.bind(this));
+					changed = {};
+				} else {
+					this._ruleOptions.cmdOrFun(Object.keys(changed));
+					changed = {};
+				}
 			} else {
-				this._execChild(filePath, action);
+				if (this.getOption("runSeparate")) {
+					Object.keys(changed).forEach(function (fileName) {
+						var action = changed[fileName].action;
+						this._execChildSeparate(fileName, action);
+					}.bind(this));
+					changed = {};
+				} else {
+					var onExit = function () {
+						if (Object.keys(changed).length) {
+							this._execChildBatch(Object.keys(changed), onExit);
+							changed = {};
+						}
+					}.bind(this);
+
+					if (!this._childRunning) {
+						this._execChildBatch(Object.keys(changed), onExit);
+						changed = {};
+					}
+				}
 			}
 		} else if (this._ruleOptions.type === "reload") {
 			this._restartChild();
@@ -384,27 +415,21 @@ Watcher.prototype._terminateChild = function (callback) {
 	}
 };
 
-Watcher.prototype._execChild = function (filePath, action) {
+Watcher.prototype._execChildBatch = function (filePaths, callback) {
 	var cmd;
 	if (this._ruleOptions.cmdOrFun.indexOf("${") !== -1) {
 		var cwd = path.resolve(".")
-		var relFile = filePath;
-		var file = path.resolve(filePath);
-		var relDir = path.dirname(filePath);
-		var dir = path.resolve(path.dirname(filePath));
+		var relFiles = filePaths;
+		var files = filePaths.map(function (f) { return path.resolve(f); });
 		var body = "var cwd = \"" + cwd + "\";"
-			+ "var relFile = \"" +relFile + "\";"
-			+ "var file = \"" + file + "\";"
-			+ "var relDir = \"" + relDir + "\";"
-			+ "var dir = \"" + dir + "\";"
-			+ "var action = \"" + action + "\";"
-			+ "return `" + this._ruleOptions.cmdOrFun + "`;";
+			+ "var relFiles = " + JSON.stringify(relFiles) + ";"
+			+ "var files = " + JSON.stringify(files) + ";"
+			+ "return `" + this._ruleOptions.cmdOrFun.replace(/\\/g, "\\\\") + "`;";
 		var func = new Function(body);
 		var cmd = func();
 	} else {
 		cmd = this._ruleOptions.cmdOrFun;
 	}
-	console.log("cmd", cmd);
 
 	this._childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
@@ -429,8 +454,65 @@ Watcher.prototype._execChild = function (filePath, action) {
 	}.bind(this));
 
 	this._childRunning.on("exit", function () {
-		this._childRunning = null;
+		setTimeout(function () { // to prevent call stack error
+			callback();
+			this._childRunning = null;
+		}.bind(this), 0);
 	}.bind(this));
+};
+
+Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
+	var cmd;
+	if (this._ruleOptions.cmdOrFun.indexOf("${") !== -1) {
+		var cwd = path.resolve(".")
+		var relFile = filePath;
+		var file = path.resolve(filePath);
+		var relDir = path.dirname(filePath);
+		var dir = path.resolve(path.dirname(filePath));
+		var body = "var cwd = \"" + cwd + "\";"
+			+ "var relFile = \"" +relFile + "\";"
+			+ "var file = \"" + file + "\";"
+			+ "var relDir = \"" + relDir + "\";"
+			+ "var dir = \"" + dir + "\";"
+			+ "var action = \"" + action + "\";"
+			+ "return `" + this._ruleOptions.cmdOrFun.replace(/\\/g, "\\\\") + "`;";
+		var func = new Function(body);
+		cmd = func();
+	} else {
+		cmd = this._ruleOptions.cmdOrFun;
+	}
+	var childRunning = exec(cmd, {
+		writeToConsole: this.getOption("writeToConsole"),
+		shell: this.getOption("shell"),
+		debug: this.getOption("debug")
+	});
+
+	childRunning.stdout.on("data", function (buffer) {
+		var text = buffer.toString();
+		if (this.getOption("writeToConsole")) {
+			console.log(text.replace(/\n$/, ""));
+		}
+		this._writeLog({ stream: "stdout", text: text });
+	}.bind(this));
+
+	childRunning.stderr.on("data", function (buffer) {
+		var text = buffer.toString();
+		if (this.getOption("writeToConsole")) {
+			console.error(text.replace(/\n$/, ""));
+		}
+		this._writeLog({ stream: "stderr", text: text });
+	}.bind(this));
+
+	childRunning.on("exit", function () {
+		var index = this._childrenRunning.indexOf(childRunning);
+		this._childrenRunning.splice(index, 1);
+		//callback();
+	}.bind(this));
+	
+	if (!this._childrenRunning) {
+		this._childrenRunning = [];
+	}
+	this._childrenRunning.push(childRunning);
 };
 
 Watcher.prototype._runRestartingChild = function () {
