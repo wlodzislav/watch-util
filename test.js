@@ -80,11 +80,11 @@ describe("", function () {
 		}, 100);
 	});
 
-	it("on remove", function (done) {
+	it("on delete", function (done) {
 		shelljs.touch("temp/c");
 		var w = Watcher(["temp/c"], assign({ type: "exec" }, defaultOptions), function (fileName, action) {
 			assert.equal(fileName, "temp/c");
-			assert.equal(action, "remove");
+			assert.equal(action, "delete");
 			w.stop();
 			done();
 		});
@@ -92,6 +92,28 @@ describe("", function () {
 
 		setTimeout(function () {
 			shelljs.rm("temp/c");
+		}, 100);
+	});
+
+	it("handle only some actions", function (done) {
+		var w = Watcher(["temp/c2"], assign({ type: "exec", actions: ["delete"] }, defaultOptions), function (fileName, action) {
+			assert.equal(fileName, "temp/c2");
+			assert.equal(action, "delete");
+			w.stop();
+			done();
+		});
+		w.start();
+
+		setTimeout(function () {
+			shelljs.touch("temp/c2");
+
+			setTimeout(function () {
+				shelljs.touch("temp/c2");
+
+				setTimeout(function () {
+					shelljs.rm("temp/c2");
+				}, 100);
+			}, 100);
 		}, 100);
 	});
 

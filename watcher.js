@@ -206,6 +206,11 @@ Watcher.prototype.start = function (callback) {
 	this._childRunning = null;
 	var firstTime = true;
 	var execCallback = debounce(function (action, filePath) {
+		var actions = this.getOption("actions");
+		if (actions.indexOf(action) === -1) {
+			return;
+		}
+
 		if (this._ruleOptions.type === "exec") {
 			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 				this._ruleOptions.cmdOrFun(filePath, action);
@@ -245,7 +250,7 @@ Watcher.prototype.start = function (callback) {
 							if (err.code == "ENOENT") {
 								this._watchers[p].close();
 								delete this._watchers[p];
-								execCallback("remove", p);
+								execCallback("delete", p);
 								return;
 							}
 						}
@@ -255,11 +260,11 @@ Watcher.prototype.start = function (callback) {
 
 						if (this.getOption("mtimeCheck")) {
 							if (stat.mtime > mtime) {
-								execCallback(action, p);
+								execCallback("change", p);
 								mtime = stat.mtime;
 							}
 						} else {
-							execCallback(action, p);
+							execCallback("change", p);
 						}
 					}.bind(this));
 					if (this.getOption("debug")) {
@@ -285,7 +290,7 @@ Watcher.prototype.start = function (callback) {
 				if (this._watchers[p]) {
 					this._watchers[p].close();
 					delete this._watchers[p];
-					execCallback("remove", p);
+					execCallback("delete", p);
 				}
 			}
 		}.bind(this));
@@ -401,11 +406,17 @@ Watcher.prototype._execChild = function (filePath, action) {
 
 	this._childRunning.stdout.on("data", function (buffer) {
 		var text = buffer.toString();
+		if (this.getOption("writeToConsole")) {
+			console.log(text);
+		}
 		this._writeLog({ stream: "stdout", text: text });
 	}.bind(this));
 
 	this._childRunning.stderr.on("data", function (buffer) {
 		var text = buffer.toString();
+		if (this.getOption("writeToConsole")) {
+			console.error(text);
+		}
 		this._writeLog({ stream: "stderr", text: text });
 	}.bind(this));
 
@@ -428,11 +439,17 @@ Watcher.prototype._runRestartingChild = function () {
 
 	this._childRunning.stdout.on("data", function (buffer) {
 		var text = buffer.toString();
+		if (this.getOption("writeToConsole")) {
+			console.log(text);
+		}
 		this._writeLog({ stream: "stdout", text: text });
 	}.bind(this));
 
 	this._childRunning.stderr.on("data", function (buffer) {
 		var text = buffer.toString();
+		if (this.getOption("writeToConsole")) {
+			console.error(text);
+		}
 		this._writeLog({ stream: "stderr", text: text });
 	}.bind(this));
 
