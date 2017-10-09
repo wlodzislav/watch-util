@@ -282,7 +282,7 @@ describe("", function () {
 		}, 50);
 	});
 
-	it.only("runSeparate == false", function (done) {
+	it("runSeparate == false", function (done) {
 		var w1 = Watcher(["temp/g7"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
 			var content = fs.readFileSync("temp/g7", "utf8");
 			assert.equal(content, "temp/f7,temp/f8\n");
