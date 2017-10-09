@@ -16,9 +16,9 @@ program
 	.option("--restart-on-error", "Restart cmd if cmd crashed or exited with non 0 status")
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
 	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
-	.option("-p --exec-variable-prefix <prefix>", "Prefix for built-in variables interpolation in exec command")
 	.option("-a, --action <action>", "Exec cmd only for specified action, arg may be used multiple times to specify multiple actions, possible values: create, change, delete", reducer, [])
 	.option("--run-separate", "Run cmd separately for each changed file")
+	.option("--parallel-limit <number>", "Max number of parallel running cmds in --run-separate mode")
 	.option("--debug", "Print debug info");
 
 program.on('--help', function(){
@@ -36,6 +36,18 @@ if (program.exec) {
 
 if (program.action.length) {
 	program.actions = program.action;
+}
+
+if (program.debounce) {
+	program.debounce = +program.debounce;
+}
+
+if (program.reglob) {
+	program.reglob = +program.reglob;
+}
+
+if (program.parallelLimit) {
+	program.parallelLimit = +program.parallelLimit;
 }
 
 program.writeToConsole = true;

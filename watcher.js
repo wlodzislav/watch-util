@@ -5,6 +5,7 @@ var EventEmitter = require('events');
 
 var glob = require("glob");
 var chalk = require("chalk");
+var async = require("async");
 
 var utils = require("./utils");
 var debounce = utils.debounce;
@@ -229,11 +230,24 @@ Watcher.prototype.start = function (callback) {
 				}
 			} else {
 				if (this.getOption("runSeparate")) {
-					Object.keys(changed).forEach(function (fileName) {
-						var action = changed[fileName].action;
-						this._execChildSeparate(fileName, action);
-					}.bind(this));
-					changed = {};
+					var runForEach = function () {
+						var fileNames = Object.keys(changed);
+						async.eachLimit(fileNames, this.getOption("parallelLimit"), function (fileName, callback) {
+							var action = changed[fileName].action;
+							delete changed[fileName];
+							this._execChildSeparate(fileName, action, callback);
+						}.bind(this), function () {
+							if (Object.keys(changed).length) {
+								setTimeout(function () { // to prevent call stack error
+									runForEach();
+								}, 0);
+							}
+						});
+					}.bind(this);
+
+					if (!this._childrenRunning || !this._childrenRunning.length) {
+						runForEach();
+					}
 				} else {
 					var onExit = function () {
 						if (Object.keys(changed).length) {
@@ -506,7 +520,7 @@ Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
 	childRunning.on("exit", function () {
 		var index = this._childrenRunning.indexOf(childRunning);
 		this._childrenRunning.splice(index, 1);
-		//callback();
+		callback();
 	}.bind(this));
 	
 	if (!this._childrenRunning) {
