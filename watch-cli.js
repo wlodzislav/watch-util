@@ -2,6 +2,11 @@ var program = require('commander');
 
 var Watcher = require("./watcher");
 
+function reducer(raw, arr) {
+	arr.push(raw);
+	return arr;
+}
+
 program
 	.usage("[options] -- <shell cmd>\n\n    Util for restarting/execution  shell commands on files changes")
 	.option("-e --exec", "Execute comand on changes, not reload")
@@ -12,6 +17,7 @@ program
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
 	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
 	.option("-p --exec-variable-prefix <prefix>", "Prefix for built-in variables interpolation in exec command")
+	.option("-a, --action <action>", "Exec cmd only for specified action, arg may be used multiple times to specify multiple actions, possible values: create, change, delete", reducer, [])
 	.option("--debug", "Print debug info");
 
 program.on('--help', function(){
@@ -26,6 +32,12 @@ program.parse(process.argv);
 if (program.exec) {
 	program.type = "exec";
 }
+
+if (program.action) {
+	program.actions = program.action;
+}
+
+program.writeToConsole = true;
 
 var watcher = Watcher(program.glob, program, program.args.join(" "));
 watcher.start();

@@ -407,7 +407,7 @@ Watcher.prototype._execChild = function (filePath, action) {
 	this._childRunning.stdout.on("data", function (buffer) {
 		var text = buffer.toString();
 		if (this.getOption("writeToConsole")) {
-			console.log(text);
+			console.log(text.replace(/\n$/, ""));
 		}
 		this._writeLog({ stream: "stdout", text: text });
 	}.bind(this));
@@ -415,7 +415,7 @@ Watcher.prototype._execChild = function (filePath, action) {
 	this._childRunning.stderr.on("data", function (buffer) {
 		var text = buffer.toString();
 		if (this.getOption("writeToConsole")) {
-			console.error(text);
+			console.error(text.replace(/\n$/, ""));
 		}
 		this._writeLog({ stream: "stderr", text: text });
 	}.bind(this));
@@ -440,7 +440,7 @@ Watcher.prototype._runRestartingChild = function () {
 	this._childRunning.stdout.on("data", function (buffer) {
 		var text = buffer.toString();
 		if (this.getOption("writeToConsole")) {
-			console.log(text);
+			console.log(text.replace(/\n$/, ""));
 		}
 		this._writeLog({ stream: "stdout", text: text });
 	}.bind(this));
@@ -448,7 +448,7 @@ Watcher.prototype._runRestartingChild = function () {
 	this._childRunning.stderr.on("data", function (buffer) {
 		var text = buffer.toString();
 		if (this.getOption("writeToConsole")) {
-			console.error(text);
+			console.error(text.replace(/\n$/, ""));
 		}
 		this._writeLog({ stream: "stderr", text: text });
 	}.bind(this));
