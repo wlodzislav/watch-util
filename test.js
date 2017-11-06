@@ -1,302 +1,448 @@
 var assert = require("assert");
-var shelljs = require("shelljs");
 var fs = require("fs");
-var assign = require("./utils").assign;
+var EventEmitter = require('events');
+var express = require("express");
+var bodyParser = require("body-parser");
+var deepEqual = require('deep-equal');
+
+var shelljs = require("shelljs");
 
 var Watcher = require("./watcher");
+var assign = require("./utils").assign;
+
+var _port = 8555;
+function Stub() {
+	if (!(this instanceof Stub)) { return new Stub(); }
+
+	this.ee = new EventEmitter();
+	this.once = this.ee.once.bind(this.ee);
+
+	this.port = _port++; // to make sure cmds for other watchers don't send /exec and /reload
+
+	this.isCreated = false;
+	this.createdFiles = [];
+	this.isChanged = false;
+	this.changedFiles = [];
+	this.isDeleted = false;
+	this.deletedFiles = [];
+
+	this.isCmdExecuted = false
+	this.execTimes = 0;
+	this.isCmdReloaded = false;
+	this.reloadTimes = 0;
+
+	this.execCmd = "node test-helper.js --port " + this.port + " --type exec --file-name {relFile}";
+	this.execCrashCmd = "node test-helper.js --port " + this.port + " --type exec --exit 1";
+	this.reloadCmd = "node test-helper.js --port " + this.port + " --type reload";
+
+	this.expectations = [];
+
+	this._app = express();
+	this._app.use(bodyParser.json());
+
+	this._app.post("/exec", function (req, res) {
+		var fileName = req.body.fileName;
+		res.send({});
+
+		this.isCmdExecuted = true;
+		this.execTimes++;
+		this.ee.emit("exec", fileName);
+	}.bind(this));
+
+	this._app.get("/reload", function (req, res) {
+		res.send({});
+
+		this.isCmdReloaded = true;
+		this.reloadTimes++;
+		this.ee.emit("reload");
+	}.bind(this));
+
+	this.callback = this.callback.bind(this);
+}
+
+Stub.prototype.callback = function () {
+	if (arguments.length === 2) {
+		var fileName = arguments[0];
+		var action = arguments[1];
+
+		if (action === "create") {
+			this.isCreated = true;
+			this.createdFiles.push(fileName);
+		} else if (action === "change") {
+			this.isChanged = true;
+			this.changedFiles.push(fileName);
+		} else if (action === "delete") {
+			this.isDeleted = true;
+			this.deletedFiles.push(fileName);
+		}
+	} else {
+		var fileNames = arguments[0];
+		this.isChanged = true;
+		[].push.apply(this.changedFiles, fileNames);
+	}
+
+	if (this._callback) {
+		this._callback.call(this, arguments);
+	}
+};
+
+Stub.prototype._createCallback = function (exp) {
+	return function () {
+		if (arguments.length === 2) {
+			var fileName = arguments[0];
+			var action = arguments[1];
+
+			if (exp.action !== action) {
+				throw "Expected action \"" + exp.action + "\" but got \"" + action + "\"";
+			}
+
+			if (exp.fileName !== fileName) {
+				throw "Expected file \"" + exp.fileName + "\" but got \"" + fileName + "\"";
+			}
+
+		} else {
+			var fileNames = arguments[0];
+
+			if (deepEqual(exp.fileNames, fileNames)) {
+				throw "Expected files \"" + exp.fileNames.join(", ") + "\" but got \"" + fileNames.join(", ") + "\"";
+			}
+		}
+
+		this._callback = null;
+		this.next();
+	}.bind(this);
+};
+
+Stub.prototype.start = function () {
+	if (!this._started) {
+		this._started = true;
+
+		this._server = this._app.listen(this.port, function () {
+			this.next();
+		}.bind(this));
+	}
+};
+
+Stub.prototype.next = function () {
+	var exp = this.expectations[0];
+	this.expectations = this.expectations.slice(1);
+
+	if (!exp) {
+		return;
+	}
+
+	if (["create", "change", "delete"].indexOf(exp.action) !== -1) {
+		this._callback = this._createCallback(exp);
+	} else if (exp.action === "tap") {
+		exp.callback();
+		this.next();
+	} else if (exp.action === "wait") {
+		setTimeout(this.next.bind(this), exp.timeout);
+	} else if (exp.action === "exec" || exp.action === "reload") {
+		this.once(exp.action, function (fileName) {
+			if (exp.fileName && exp.fileName !== fileName) {
+				throw "Expected cmd for file \"" + exp.fileName + "\" but got \"" + fileName + "\"";
+			}
+			this.next();
+		}.bind(this));
+	}
+};
+
+Stub.prototype.close = function () {
+	this._server.close();
+};
+
+Stub.prototype.wait = function (timeout) {
+	this.expectations.push({ action: "wait", timeout: timeout || 100 });
+	this.start();
+	return this;
+};
+
+Stub.prototype.tap = function (callback) {
+	this.expectations.push({ action: "tap", callback: callback });
+	this.start();
+	return this;
+};
+
+Stub.prototype.expectCreate = function (fileName) {
+	this.expectations.push({ action: "create", fileName: fileName });
+	this.start();
+	return this;
+};
+
+Stub.prototype.expectChange = function (fileName) {
+	this.expectations.push({ action: "change", fileName: fileName });
+	this.start();
+	return this;
+};
+
+Stub.prototype.expectDelete = function (fileName) {
+	this.expectations.push({ action: "delete", fileName: fileName });
+	this.start();
+	return this;
+};
+
+Stub.prototype.expectChanges = function (fileNames) {
+	this.expectations.push({ action: "change", fileNames: fileNames });
+	this.start();
+	return this;
+};
+
+Stub.prototype.done = Stub.prototype.tap;
+
+Stub.prototype.expectExec = function (fileName) {
+	this.expectations.push({ action: "exec", fileName: fileName });
+	return this;
+};
+
+Stub.prototype.waitExec = Stub.prototype.expectExec;
+
+Stub.prototype.expectReload = function () {
+	this.expectations.push({ action: "reload" });
+	return this;
+};
+
+/*
+
+stub.expectCreate("temp/a")
+	.tap(change("temp/a"))
+	.expectChange("temp/b")
+
+.tap
+.expectCreate
+.expectChange
+.expectDelete
+.expectExec
+.expectReload
+
+
+
+
+*/
+
+function create(f) {
+	return function () {
+		shelljs.touch(f);
+	};
+}
+
+var change = create;
+
+function rm(f) {
+	return function () {
+		shelljs.rm(f);
+	};
+}
+
+var watcherInitTimeout = 100;
 
 describe("", function () {
 	this.timeout(5000);
 	this.slow(500);
 
-	before(function () {
-		shelljs.rm("-rf", "temp");
+	var stub, w;
+	beforeEach(function () {
 		shelljs.mkdir("-p", "temp");
-	});
-
-	after(function() {
-		//shelljs.rm("-rf", "temp");
+		stub = new Stub();
 	});
 
 	afterEach(function (done) {
-		// wait for watcher to close
-		setTimeout(done, 100);
+		shelljs.rm("-rf", "temp");
+		stub.close();
+
+		w.stop(done);
 	});
 
 	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false, runSeparate: true };
 
 	it("on create", function (done) {
-		var w = new Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			assert.equal(fileName, "temp/a");
-			assert.equal(action, "create");
-			w.stop();
-			done();
-		});
-		w.start();
+		w = new Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
 
-		setTimeout(function () {
-			shelljs.touch("temp/a");
-		}, 100);
+		stub
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(create("temp/a"))
+			.expectCreate("temp/a")
+			.done(done);
 	});
 
 	it("on change", function (done) {
-		shelljs.touch("temp/b");
-		var w = Watcher(["temp/b"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			assert.equal(fileName, "temp/b");
-			assert.equal(action, "change");
-			w.stop();
-			done();
-		});
-		w.start();
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
 
-		setTimeout(function () {
-			shelljs.touch("temp/b");
-		}, 100);
+		stub
+			.tap(create("temp/a"))
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(change("temp/a"))
+			.expectChange("temp/a")
+			.done(done);
 	});
 
 	it("on change multiple", function (done) {
-		shelljs.touch("temp/b2");
-		var changes = 0;
-		var w = Watcher(["temp/b2"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			assert.equal(fileName, "temp/b2");
-			assert.equal(action, "change");
-			changes++;
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
 
-			if (changes == 1) {
-				setTimeout(function () {
-					shelljs.touch("temp/b2");
-				}, 0);
-			}
-
-			if (changes >= 2) {
-				w.stop();
-				done();
-			}
-		});
-		w.start();
-
-		setTimeout(function () {
-			shelljs.touch("temp/b2");
-		}, 100);
+		stub
+			.tap(create("temp/a"))
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(change("temp/a"))
+			.expectChange("temp/a")
+			.tap(change("temp/a"))
+			.expectChange("temp/a")
+			.done(done);
 	});
 
 	it("on delete", function (done) {
-		shelljs.touch("temp/c");
-		var w = Watcher(["temp/c"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			assert.equal(fileName, "temp/c");
-			assert.equal(action, "delete");
-			w.stop();
-			done();
-		});
-		w.start();
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
 
-		setTimeout(function () {
-			shelljs.rm("temp/c");
-		}, 100);
+		stub
+			.tap(create("temp/a"))
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(rm("temp/a"))
+			.expectDelete("temp/a")
+			.done(done);
 	});
 
 	it("handle only some actions", function (done) {
-		var w = Watcher(["temp/c2"], assign({}, defaultOptions, { type: "exec", actions: ["delete"] }), function (fileName, action) {
-			assert.equal(fileName, "temp/c2");
-			assert.equal(action, "delete");
-			w.stop();
-			done();
-		});
-		w.start();
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec", actions: ["delete"] }), stub.callback);
 
-		setTimeout(function () {
-			shelljs.touch("temp/c2");
-
-			setTimeout(function () {
-				shelljs.touch("temp/c2");
-
-				setTimeout(function () {
-					shelljs.rm("temp/c2");
-				}, 100);
-			}, 100);
-		}, 100);
+		stub
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(create("temp/a"))
+			.wait()
+			.tap(change("temp/a"))
+			.wait()
+			.tap(rm("temp/a"))
+			.expectDelete("temp/a")
+			.tap(function () {
+				assert(!stub.isCreated);
+				assert(!stub.isChanged);
+			})
+			.done(done);
 	});
 
 	it("cmd exec", function (done) {
-		shelljs.touch("temp/d");
-		var w1 = Watcher(["temp/e"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			w1.stop();
-			w2.stop();
-			done();
-		});
-		var w2 = Watcher(["temp/d"], assign({}, defaultOptions, { type: "exec", shell: "node -e" }), "require(\"shelljs\").touch(\"temp/e\")");
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec", writeToConsole: true }), stub.execCmd);
 
-		w1.start();
-		w2.start();
-		setTimeout(function () {
-			shelljs.touch("temp/d");
-		}, 100);
+		stub
+			.tap(create("temp/a"))
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(change("temp/a"))
+			.expectExec()
+			.done(done);
 	});
 
 	it("cmd restart", function (done) {
-		shelljs.touch("temp/f");
-		var changes = 0;
-		var w1 = Watcher(["temp/g"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			changes++;
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", writeToConsole: true }), stub.reloadCmd);
 
-			if (changes === 1) {
-				setTimeout(function () {
-					shelljs.touch("temp/f");
-				}, 0);
-			}
-			if (changes >= 2) {
-				var content = fs.readFileSync("temp/g", "utf8");
-				assert.ok(content.startsWith("run\nrun\n"));
-				w1.stop();
-				w2.stop();
-				done();
-			}
-		});
-		var w2 = Watcher(["temp/f"], assign({}, defaultOptions, { shell: "node -e", writeToConsole: false }), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g\"); setInterval(function () {}, 100);");
-
-		w1.start();
-		w2.start();
-		setTimeout(function () {
-			shelljs.touch("temp/f");
-		}, 50);
+		stub
+			.tap(create("temp/a"))
+			.tap(w.start.bind(w))
+			.waitExec() // to make sure cmd is fully loaded
+			.tap(change("temp/a"))
+			.expectExec()
+			.done(done);
 	});
 
 	it("cmd restart, exiting cmd", function (done) {
-		shelljs.touch("temp/b2");
-		var changes = 0;
-		var w1 = Watcher(["temp/a2"], assign({}, defaultOptions, { type: "exec" }), function (fileName0, action) {
-			changes++;
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false }), stub.execCmd);
 
-			if (changes === 1) {
-				setTimeout(function () {
-					shelljs.touch("temp/b2");
-				}, 0);
-			}
-			if (changes >= 2) {
-				var content = fs.readFileSync("temp/a2", "utf8");
-				assert.ok(content.startsWith("run\nrun\n"));
-				w1.stop();
-				w2.stop();
-				done();
-			}
-		});
-		var w2 = Watcher(["temp/b2"],  assign({}, defaultOptions, { shell: "node -e", writeToConsole: false }), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/a2\"); setTimeout(function () {}, 100);");
-
-		w1.start();
-		w2.start();
-		setTimeout(function () {
-			shelljs.touch("temp/b2");
-		}, 50);
+		stub
+			.tap(create("temp/a"))
+			.tap(w.start.bind(w))
+			.waitExec().wait() // to make sure cmd is exited
+			.tap(change("temp/a"))
+			.expectExec()
+			.done(done);
 	});
 
 	it("cmd restart on error", function (done) {
-		var changes = 0;
-		var w1 = Watcher(["temp/g2"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			changes++;
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false, restartOnError: true }), stub.execCrashCmd);
 
-			if (changes >= 5) {
-				w1.stop();
-				w2.stop();
-				done();
-			}
-		});
-		var w2 = Watcher(["temp/f2"], assign({}, defaultOptions, { shell: "node -e", writeToConsole: false, restartOnError: true }), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g2\"); process.exit(1);");
-
-		w1.start();
-		w2.start();
+		stub
+			.tap(w.start.bind(w))
+			.expectExec()
+			.expectExec()
+			.done(done);
 	});
 
 	it("cmd don't restart on error", function (done) {
-		var changes = 0;
-		var w1 = Watcher(["temp/g3"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			changes++;
-		});
-		var w2 = Watcher(["temp/f3"], assign({}, defaultOptions, { shell: "node -e", writeToConsole: false, restartOnError: false }), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g3\"); process.exit(1);");
-		setTimeout(function () {
-			assert.equal(changes, 1);
-			w1.stop();
-			w2.stop();
-			done();
-		}, 300);
-		w1.start();
-		w2.start();
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false, restartOnError: false, writeToConsole: true }), stub.execCrashCmd);
+
+		stub
+			.tap(w.start.bind(w))
+			.expectExec()
+			.wait(3000)
+			.tap(function () {
+				assert.equal(stub.execTimes, 1);
+				assert(!stub.isCmdReloaded);
+			})
+			.done(done);
 	});
 	
 	it("cmd restart on success", function (done) {
-		var changes = 0;
-		var w1 = Watcher(["temp/g4"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			changes++;
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: true, restartOnError: false }), stub.execCmd);
 
-			if (changes >= 5) {
-				w1.stop();
-				w2.stop();
-				done();
-			}
-		});
-		var w2 = Watcher(["temp/f4"], assign({}, defaultOptions, { shell: "node -e", writeToConsole: false, restartOnSuccess: true }), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g4\"); process.exit(0);");
-		w1.start();
-		w2.start();
+		stub
+			.tap(w.start.bind(w))
+			.expectExec()
+			.expectExec()
+			.done(done);
 	});
 
 	it("cmd don't restart on success", function (done) {
-		var changes = 0;
-		var w1 = Watcher(["temp/g5"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			changes++;
-		});
-		var w2 = Watcher(["temp/f5"], assign({}, defaultOptions, { shell: "node -e", writeToConsole: false, restartOnSuccess: false }), "require(\"shelljs\").echo(\"run\\n\").toEnd(\"temp/g5\"); process.exit(0);");
-		setTimeout(function () {
-			assert.equal(changes, 1);
-			w1.stop();
-			w2.stop();
-			done();
-		}, 300);
-		w1.start();
-		w2.start();
+		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false, restartOnError: false }), stub.execCmd);
+
+		stub
+			.tap(w.start.bind(w))
+			.expectExec()
+			.wait(500)
+			.tap(function () {
+				assert.equal(stub.execTimes, 1);
+				assert(!stub.isCmdReloaded);
+			})
+			.done(done);
 	});
 	
 	it("runSeparate == true", function (done) {
-		shelljs.touch("temp/f6");
-		var changes = 0;
-		var w1 = Watcher(["temp/g6"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			changes++;
+		w = Watcher(["temp/a", "temp/b"], assign({}, defaultOptions, { type: "exec", runSeparate: true, debounce: 100 }), stub.execCmd);
 
-			if (changes === 1) {
-				setTimeout(function () {
-					shelljs.touch("temp/f6");
-				}, 0);
-			}
-			if (changes >= 2) {
-				var content = fs.readFileSync("temp/g6", "utf8");
-				assert.equal(content, "temp/f6\ntemp/f6\n");
-				w1.stop();
-				w2.stop();
-				done();
-			}
-		});
-		var w2 = Watcher(["temp/f6"], assign({}, defaultOptions, { type: "exec", shell: "node -e", writeToConsole: false }), "require(\"shelljs\").echo(\"${relFile}\\n\").toEnd(\"temp/g6\");");
-
-		w1.start();
-		w2.start();
-		setTimeout(function () {
-			shelljs.touch("temp/f6");
-		}, 50);
+		stub
+			.tap(create("temp/a"))
+			.tap(create("temp/b"))
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(change("temp/a"))
+			.tap(change("temp/b"))
+			.wait(2000)
+			.tap(function () {
+				assert.equal(stub.execTimes, 2);
+			})
+			.done(done);
 	});
 
 	it("runSeparate == false", function (done) {
-		var w1 = Watcher(["temp/g7"], assign({}, defaultOptions, { type: "exec" }), function (fileName, action) {
-			var content = fs.readFileSync("temp/g7", "utf8");
-			assert.equal(content, "temp/f7,temp/f8\n");
-			w1.stop();
-			w2.stop();
-			done();
-		});
-		var w2 = Watcher(["temp/f7", "temp/f8"], assign({}, defaultOptions, { type: "exec", runSeparate: false, shell: "node -e", writeToConsole: false }), "require(\"shelljs\").echo(\"${relFiles}\\n\").toEnd(\"temp/g7\");");
+		w = Watcher(["temp/a", "temp/b"], assign({}, defaultOptions, { type: "exec", runSeparate: false, debounce: 100 }), stub.execCmd);
 
-		w1.start();
-		w2.start();
-		setTimeout(function () {
-			shelljs.touch("temp/f7");
-			shelljs.touch("temp/f8");
-		}, 50);
+		stub
+			.tap(create("temp/a"))
+			.tap(create("temp/b"))
+			.tap(w.start.bind(w))
+			.wait()
+			.tap(change("temp/a"))
+			.tap(change("temp/b"))
+			.wait(2000)
+			.tap(function () {
+				assert.equal(stub.execTimes, 1);
+			})
+			.done(done);
 	});
+
+	it(".stop() terminates reloading cmd during reload");
+	it(".stop() terminates runSeparate=true cmds runnning during reload");
+	it(".stop() terminates restartingOnSuccess=true cmd during reload");
+	it(".stop() terminates restartingOnError=true cmd during reload");
 });

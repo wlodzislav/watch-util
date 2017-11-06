@@ -137,6 +137,7 @@ function Watcher(globs, ruleOptions, cmdOrFun) {
 
 	this.ee = new EventEmitter();
 	this.on = this.ee.on.bind(this.ee);
+	this.once = this.ee.once.bind(this.ee);
 }
 
 Watcher.prototype.isRunning = function () {
@@ -216,6 +217,9 @@ Watcher.prototype.start = function (callback) {
 	}.bind(this);
 
 	var execCallbackDebounce = debounce(function () {
+		if (this._runState !== "running") {
+			return;
+		}
 		if (this._ruleOptions.type === "exec") {
 			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
 				if (this.getOption("runSeparate")) {
@@ -233,10 +237,16 @@ Watcher.prototype.start = function (callback) {
 					var runForEach = function () {
 						var fileNames = Object.keys(changed);
 						async.eachLimit(fileNames, this.getOption("parallelLimit"), function (fileName, callback) {
+							if (this._runState !== "running") {
+								return callback();
+							}
 							var action = changed[fileName].action;
 							delete changed[fileName];
 							this._execChildSeparate(fileName, action, callback);
 						}.bind(this), function () {
+							if (this._runState !== "running") {
+								return;
+							}
 							if (Object.keys(changed).length) {
 								setTimeout(function () { // to prevent call stack error
 									runForEach();
@@ -251,6 +261,9 @@ Watcher.prototype.start = function (callback) {
 				} else {
 					var onExit = function () {
 						if (Object.keys(changed).length) {
+							if (this._runState !== "running") {
+								return;
+							}
 							this._execChildBatch(Object.keys(changed), onExit);
 							changed = {};
 						}
@@ -267,6 +280,9 @@ Watcher.prototype.start = function (callback) {
 		}
 	}.bind(this), this.getOption("debounce"));
 	var reglob = function () {
+		if (this._runState !== "running") {
+			return;
+		}
 		var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globs));
 
 		paths.forEach(function (p) {
@@ -359,18 +375,18 @@ Watcher.prototype.start = function (callback) {
 
 Watcher.prototype.stop = function (callback) {
 	var afterTerminate = function () {
+		if (callback) { return callback(null); }
+	}.bind(this);
+
+	if (this._runState === "running") {
+		this._runState = "stopped";
 		clearInterval(this._reglobInterval);
 		this._reglobInterval = null;
 		Object.keys(this._watchers).forEach(function (p) {
 			this._watchers[p].close();
 			delete this._watchers[p];
 		}.bind(this));
-		this._runState = "stopped";
 
-		if (callback) { return callback(null); }
-	}.bind(this);
-
-	if (this._runState === "running") {
 		if (this._childRunning) {
 			this._terminateChild(function (err) {
 				afterTerminate();
@@ -424,8 +440,13 @@ Watcher.prototype._terminateChild = function (callback) {
 			}
 			this._childRunning = null;
 			this._isTerminating = false;
+			this.ee.emit("terminated");
 			if (callback) { callback(); }
 		}.bind(this));
+	} else {
+		if (callback) {
+			this.once("terminated", callback);
+		}
 	}
 };
 
@@ -560,6 +581,9 @@ Watcher.prototype._runRestartingChild = function () {
 	this._childRunning.on("exit", function (code) {
 		if (!(childRunning.killed || code === null)) { // not killed
 			this._childRunning = null;
+			if (this._runState !== "running") {
+				return;
+			}
 			if (this.getOption("restartOnSuccess") && code === 0) {
 				this._runRestartingChild();
 			}
@@ -579,7 +603,10 @@ Watcher.prototype._restartChild = function () {
 				debugLog(chalk.red("Terminating error:"), err.message);
 				process.exit(1);
 			}
-			this._runRestartingChild();
+			// check for case when watcher is stopped while reloading cmd is terminating
+			if (this._runState === "running") {
+				this._runRestartingChild();
+			}
 		}.bind(this));
 	} else {
 		this._runRestartingChild();
