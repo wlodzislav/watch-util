@@ -39,6 +39,14 @@ PM.prototype.getOption = function (name) {
 	});
 };
 
+PM.prototype.getDefaultOptions = function (callback) {
+	if (callback) {
+		return callback(null, defaultOptions);
+	} else {
+		return defaultOptions;
+	}
+};
+
 PM.prototype.createRule = function (ruleOptions, callback) {
 	var rule = new Watcher(ruleOptions);
 	if (this.getOption("debug")) {
