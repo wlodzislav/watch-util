@@ -15,7 +15,8 @@ program
 	.option("-G --reglob <ms>", "Reglob interval to track new added files, on ms")
 	.option("--restart-on-error", "Restart cmd if cmd crashed or exited with non 0 status")
 	.option("--restart-on-success", "Restart cmd if cmd exited with 0 status")
-	.option("-s --shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
+	.option("--no-shell", "Run cmd without shell")
+	.option("-s --custom-shell <shell>", "Custom shell to run cmd in, for example '/bin/zsh -c'")
 	.option("-a, --action <action>", "Exec cmd only for specified action, arg may be used multiple times to specify multiple actions, possible values: create, change, delete", reducer, [])
 	.option("--run-separate", "Run cmd separately for each changed file")
 	.option("--parallel-limit <number>", "Max number of parallel running cmds in --run-separate mode")
@@ -32,6 +33,10 @@ program.parse(process.argv);
 
 if (program.exec) {
 	program.type = "exec";
+}
+
+if (program.shell === false) {
+	program.useShell = false;
 }
 
 if (program.action.length) {

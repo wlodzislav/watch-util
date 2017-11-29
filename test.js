@@ -253,7 +253,7 @@ describe("", function () {
 		w.stop(done);
 	});
 
-	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false, runSeparate: true };
+	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false, runSeparate: true, useShell: false };
 
 	it("on create", function (done) {
 		w = new Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);

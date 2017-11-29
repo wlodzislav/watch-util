@@ -6,7 +6,8 @@ module.exports = {
 	actions: ["create", "change", "delete"],
 	runSeparate: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
 	parallelLimit: 4, // max parallel running cmds in runSeparate == true mode
-	shell: true, // use this shell for running cmds, or default shell(true)
+	useShell: true, // run in shell
+	customShell: null, // custom shell to run cmds, if not set - run in default shell
 	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
 	writeToConsole: false, // write logs to console
 	mtimeCheck: true, // check modified time before firing events

@@ -27,26 +27,31 @@ function checkShAvailableOnWin() {
 
 
 function exec(cmd, options) {
-	if (options.shell === true) {
-		if (process.platform === 'win32') {
-			if (isShAvailableOnWin === undefined) {
-				isShAvailableOnWin = checkShAvailableOnWin();
-				if (isShAvailableOnWin && options.debug) {
-					debugLog("Will use " + chalk.yellow("'C:\\\\bin\\\\sh.exe'") + " as default shell.");
+	if (options.useShell) {
+		if (options.customShell) {
+			var shellExecutable = options.customShell.split(" ")[0];
+			var childRunning = child.spawn(shellExecutable, options.customShell.split(" ").slice(1).concat([cmd]), { stdio: ["ignore", "pipe", "pipe"] });
+		} else {
+			if (process.platform === 'win32') {
+				if (isShAvailableOnWin === undefined) {
+					isShAvailableOnWin = checkShAvailableOnWin();
+					if (isShAvailableOnWin && options.debug) {
+						debugLog("Will use " + chalk.yellow("'C:\\\\bin\\\\sh.exe'") + " as default shell.");
+					}
 				}
-			}
 
-			if (isShAvailableOnWin) {
-				var childRunning = child.spawn("/bin/sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
+				if (isShAvailableOnWin) {
+					var childRunning = child.spawn("/bin/sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
+				} else {
+					var childRunning = child.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+				}
 			} else {
 				var childRunning = child.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
 			}
-		} else {
-			var childRunning = child.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
 		}
-	} else if (typeof(options.shell) === "string") {
-		var shellExecutable = options.shell.split(" ")[0];
-		var childRunning = child.spawn(shellExecutable, options.shell.split(" ").slice(1).concat([cmd]), { stdio: ["ignore", "pipe", "pipe"] });
+	} else {
+		var splittedCmd = cmd.split(" ");
+		var childRunning = child.spawn(splittedCmd[0], splittedCmd.slice(1), { shell: false, stdio: ["ignore", "pipe", "pipe"] });
 	}
 
 	return childRunning;
@@ -468,7 +473,8 @@ Watcher.prototype._execChildBatch = function (filePaths, callback) {
 
 	this._childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
-		shell: this.getOption("shell"),
+		useShell: this.getOption("useShell"),
+		customShell: this.getOption("customShell"),
 		debug: this.getOption("debug")
 	});
 
@@ -518,7 +524,8 @@ Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
 	}
 	var childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
-		shell: this.getOption("shell"),
+		useShell: this.getOption("useShell"),
+		customShell: this.getOption("customShell"),
 		debug: this.getOption("debug")
 	});
 
@@ -557,7 +564,8 @@ Watcher.prototype._runRestartingChild = function () {
 
 	this._childRunning = exec(this._ruleOptions.cmdOrFun, {
 		writeToConsole: this.getOption("writeToConsole"),
-		shell: this.getOption("shell"),
+		useShell: this.getOption("useShell"),
+		customShell: this.getOption("customShell"),
 		debug: this.getOption("debug")
 	});
 	var childRunning = this._childRunning;
