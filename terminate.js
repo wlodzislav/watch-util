@@ -22,7 +22,7 @@ function isDeadProcessKill(pid) {
 }
 
 function isDeadPsAwk(pid) {
-	return child.execSync("ps | awk -e '{ print $1 }'").toString().indexOf(pid) == -1
+	return child.execSync("ps | awk '{ print $1 }'").toString().indexOf(pid) == -1
 }
 
 // HACK: determine working dead process check
