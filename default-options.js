@@ -1,5 +1,5 @@
 module.exports = {
-	debounce: 500, // exec/reload once in ms at max
+	debounce: 200, // exec/reload once in ms at max
 	reglob: 2000, // perform reglob to watch added files
 	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
