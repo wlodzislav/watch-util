@@ -14,9 +14,6 @@ var _port = 8555;
 function Stub() {
 	if (!(this instanceof Stub)) { return new Stub(); }
 
-	this.ee = new EventEmitter();
-	this.once = this.ee.once.bind(this.ee);
-
 	this.port = _port++; // to make sure cmds for other watchers don't send /exec and /reload
 
 	this.isCreated = false;
@@ -31,22 +28,26 @@ function Stub() {
 	this.isCmdReloaded = false;
 	this.reloadTimes = 0;
 
-	this.execCmd = "node test-helper.js --port " + this.port + " --type exec --file-name {relFile}";
+	this.execCmd = "node test-helper.js --port " + this.port + " --type exec -- ${relFile}";
+	this.execCmdBatch = "node test-helper.js --port " + this.port + " --type exec -- ${relFiles}";
 	this.execCrashCmd = "node test-helper.js --port " + this.port + " --type exec --exit 1";
 	this.reloadCmd = "node test-helper.js --port " + this.port + " --type reload";
 
-	this.expectations = [];
+	this.actions = [];
 
 	this._app = express();
 	this._app.use(bodyParser.json());
 
 	this._app.post("/exec", function (req, res) {
-		var fileName = req.body.fileName;
+		var fileNames = req.body.fileNames;
 		res.send({});
 
 		this.isCmdExecuted = true;
 		this.execTimes++;
-		this.ee.emit("exec", fileName);
+
+		if (this._waitEvent) {
+			this._waitEvent({ action: "exec", fileNames });
+		}
 	}.bind(this));
 
 	this._app.get("/reload", function (req, res) {
@@ -54,11 +55,32 @@ function Stub() {
 
 		this.isCmdReloaded = true;
 		this.reloadTimes++;
-		this.ee.emit("reload");
+
+		if (this._waitEvent) {
+			this._waitEvent({ action: "reload" });
+		}
 	}.bind(this));
 
+	this.events = [];
 	this.callback = this.callback.bind(this);
+
+	this._started = false;
 }
+
+Stub.prototype.start = function (callback) {
+	this._server = this._app.listen(this.port, callback);
+};
+
+Stub.prototype.stop = function () {
+	this._server.close();
+};
+
+Stub.prototype._runActions = function (callback) {
+	if (!this._started) {
+		setTimeout(this.next.bind(this), 0);
+		this._started = true;
+	}
+};
 
 Stub.prototype.callback = function () {
 	if (arguments.length === 2) {
@@ -75,150 +97,111 @@ Stub.prototype.callback = function () {
 			this.isDeleted = true;
 			this.deletedFiles.push(fileName);
 		}
+
+		this.events.push({ action, fileName });
 	} else {
 		var fileNames = arguments[0];
+
 		this.isChanged = true;
 		[].push.apply(this.changedFiles, fileNames);
+
+		this.events.push({ action: "change", fileNames });
 	}
 
-	if (this._callback) {
-		this._callback.call(this, arguments);
-	}
-};
-
-Stub.prototype._createCallback = function (exp) {
-	return function () {
-		if (arguments.length === 2) {
-			var fileName = arguments[0];
-			var action = arguments[1];
-
-			if (exp.action !== action) {
-				throw "Expected action \"" + exp.action + "\" but got \"" + action + "\"";
-			}
-
-			if (exp.fileName !== fileName) {
-				throw "Expected file \"" + exp.fileName + "\" but got \"" + fileName + "\"";
-			}
-
-		} else {
-			var fileNames = arguments[0];
-
-			if (deepEqual(exp.fileNames, fileNames)) {
-				throw "Expected files \"" + exp.fileNames.join(", ") + "\" but got \"" + fileNames.join(", ") + "\"";
-			}
-		}
-
-		this._callback = null;
-		this.next();
-	}.bind(this);
-};
-
-Stub.prototype.start = function () {
-	if (!this._started) {
-		this._started = true;
-
-		this._server = this._app.listen(this.port, function () {
-			this.next();
-		}.bind(this));
+	if (this._waitEvent) {
+		this._waitEvent(this.events[this.events.length - 1]);
 	}
 };
 
 Stub.prototype.next = function () {
-	var exp = this.expectations[0];
-	this.expectations = this.expectations.slice(1);
-
-	if (!exp) {
-		return;
+	var a = this.actions.shift();
+	if (!a) {
+		return this.done();
 	}
-
-	if (["create", "change", "delete"].indexOf(exp.action) !== -1) {
-		this._callback = this._createCallback(exp);
-	} else if (exp.action === "tap") {
-		exp.callback();
+	if (a.action == "wait") {
+		setTimeout(this.next.bind(this), a.timeout);
+	} else if (a.action == "tap") {
+		a.fn();
 		this.next();
-	} else if (exp.action === "wait") {
-		setTimeout(this.next.bind(this), exp.timeout);
-	} else if (exp.action === "exec" || exp.action === "reload") {
-		this.once(exp.action, function (fileName) {
-			if (exp.fileName && exp.fileName !== fileName) {
-				throw "Expected cmd for file \"" + exp.fileName + "\" but got \"" + fileName + "\"";
-			}
-			this.next();
-		}.bind(this));
-	}
-};
 
-Stub.prototype.close = function () {
-	this._server.close();
+	} else if (a.action == "waitEvent") {
+		if (this._expectedEvent) {
+			return this.done(new Error("Previous event didn't fired: " + JSON.stringify(this._expectedEvent)));
+		}
+		this._expectedEvent = a.event;
+		this._waitEvent = function (event) {
+			if (this._expectedEvent.action == "exec" && event.action == "exec" && !this._expectedEvent.fileNames) {
+				// ok
+			} else {
+				try {
+					assert.deepEqual(this._expectedEvent, event);
+				} catch (err) {
+					return this.done(err);
+				}
+			}
+			this._waitEvent = null;
+			this._expectedEvent = null;
+			this.next();
+		}.bind(this);
+	}
 };
 
 Stub.prototype.wait = function (timeout) {
-	this.expectations.push({ action: "wait", timeout: timeout || 100 });
-	this.start();
+	this.actions.push({ action: "wait", timeout: timeout || 100 });
+	this._runActions();
 	return this;
 };
 
-Stub.prototype.tap = function (callback) {
-	this.expectations.push({ action: "tap", callback: callback });
-	this.start();
+Stub.prototype.tap = function (fn) {
+	this.actions.push({ action: "tap", fn: fn });
+	this._runActions();
 	return this;
 };
 
 Stub.prototype.expectCreate = function (fileName) {
-	this.expectations.push({ action: "create", fileName: fileName });
-	this.start();
+	this.actions.push({ action: "waitEvent", event: { action: "create", fileName }});
+	this._runActions();
 	return this;
 };
 
 Stub.prototype.expectChange = function (fileName) {
-	this.expectations.push({ action: "change", fileName: fileName });
-	this.start();
+	this.actions.push({ action: "waitEvent", event: { action: "change", fileName }});
+	this._runActions();
 	return this;
 };
 
 Stub.prototype.expectDelete = function (fileName) {
-	this.expectations.push({ action: "delete", fileName: fileName });
-	this.start();
+	this.actions.push({ action: "waitEvent", event: { action: "delete", fileName }});
+	this._runActions();
 	return this;
 };
 
 Stub.prototype.expectChanges = function (fileNames) {
-	this.expectations.push({ action: "change", fileNames: fileNames });
-	this.start();
+	this.actions.push({ action: "waitEvent", event: { action: "change", fileNames }});
+	this._runActions();
 	return this;
 };
 
-Stub.prototype.done = Stub.prototype.tap;
-
-Stub.prototype.expectExec = function (fileName) {
-	this.expectations.push({ action: "exec", fileName: fileName });
+Stub.prototype.expectExec = function (fileNames) {
+	if (fileNames && !Array.isArray(fileNames)) {
+		fileNames = [fileNames];
+	}
+	this.actions.push({ action: "waitEvent", event: { action: "exec", fileNames: fileNames }});
+	this._runActions();
 	return this;
 };
 
 Stub.prototype.waitExec = Stub.prototype.expectExec;
 
 Stub.prototype.expectReload = function () {
-	this.expectations.push({ action: "reload" });
+	this.actions.push({ action: "waitEvent", event: { action: "reload" }});
+	this._runActions();
 	return this;
 };
 
-/*
-
-stub.expectCreate("temp/a")
-	.tap(change("temp/a"))
-	.expectChange("temp/b")
-
-.tap
-.expectCreate
-.expectChange
-.expectDelete
-.expectExec
-.expectReload
-
-
-
-
-*/
+Stub.prototype.done = function (done) {
+	this.done = done;
+};
 
 function create(f) {
 	return function () {
@@ -241,14 +224,15 @@ describe("", function () {
 	this.slow(500);
 
 	var stub, w;
-	beforeEach(function () {
+	beforeEach(function (done) {
 		shelljs.mkdir("-p", "temp");
 		stub = new Stub();
+		stub.start(done);
 	});
 
 	afterEach(function (done) {
 		shelljs.rm("-rf", "temp");
-		stub.close();
+		stub.stop();
 
 		w.stop(done);
 	});
@@ -425,7 +409,7 @@ describe("", function () {
 	});
 
 	it("runSeparate == false", function (done) {
-		w = Watcher(["temp/a", "temp/b"], assign({}, defaultOptions, { type: "exec", runSeparate: false, debounce: 100 }), stub.execCmd);
+		w = Watcher(["temp/a", "temp/b"], assign({}, defaultOptions, { type: "exec", runSeparate: false, debounce: 100 }), stub.execCmdBatch);
 
 		stub
 			.tap(create("temp/a"))

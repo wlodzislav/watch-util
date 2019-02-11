@@ -5,7 +5,6 @@ program
 	.option("--port <port>", "")
 	.option("--type <type>", "")
 	.option("--exit <code>", "")
-	.option("--file-name <fileName>", "")
 
 program.parse(process.argv);
 
@@ -21,7 +20,7 @@ if (program.type === "reload") {
 	process.on("SIGINT", onSig);
 }
 
-request.post({ url: "http://localhost:" + program.port + "/exec", data: { fileName: program.fileName }}, function () {
+request.post({ url: "http://localhost:" + program.port + "/exec", data: { fileNames: program.argv }}, function () {
 	if (program.type === "exec") {
 		process.exit(program.exit || 0);
 	}

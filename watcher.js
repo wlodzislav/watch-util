@@ -12,7 +12,7 @@ var debounce = utils.debounce;
 var debugLog = utils.debugLog;
 var shallowCopyObj = utils.shallowCopyObj;
 var genUID = utils.genUID;
-var terminate = require("./terminate");
+var kill = require("kill-with-style");
 var defaultOptions = require("./default-options");
 
 var isShAvailableOnWin = undefined;
@@ -432,7 +432,7 @@ Watcher.prototype._terminateChild = function (callback) {
 			debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
 		}
 		this._isTerminating = true;
-		terminate(this._childRunning.pid, {
+		kill(this._childRunning.pid, {
 			signal: this.getOption("killSignal"),
 			checkInterval: this.getOption("killCheckInterval"),
 			retryInterval: this.getOption("killRetryInterval"),
