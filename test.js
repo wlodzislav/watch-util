@@ -121,7 +121,11 @@ Stub.prototype.next = function () {
 	if (a.action == "wait") {
 		setTimeout(this.next.bind(this), a.timeout);
 	} else if (a.action == "tap") {
-		a.fn();
+		try {
+			a.fn();
+		} catch (err) {
+			return this.done(err);
+		}
 		this.next();
 
 	} else if (a.action == "waitEvent") {
@@ -239,190 +243,227 @@ describe("", function () {
 
 	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false, runSeparate: true, useShell: false };
 
-	it("on create", function (done) {
-		w = new Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
+	function opts(options) {
+		return Object.assign({}, defaultOptions, options || {});
+	}
 
-		stub
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(create("temp/a"))
-			.expectCreate("temp/a")
-			.done(done);
+	describe("handle events", function () {
+		it("create", function (done) {
+			w = new Watcher(["temp/a"], opts(), stub.callback);
+
+			stub
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(create("temp/a"))
+				.expectCreate("temp/a")
+				.tap(function () {
+					assert(stub.isCreated);
+					assert(!stub.isChanged);
+					assert(!stub.isDeleted);
+					assert.deepEqual(stub.createdFiles, ["temp/a"]);
+				})
+				.done(done);
+		});
+
+		it("change", function (done) {
+			w = Watcher(["temp/a"], opts(), stub.callback);
+
+			stub
+				.tap(create("temp/a"))
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(change("temp/a"))
+				.expectChange("temp/a")
+				.tap(function () {
+					assert(!stub.isCreated);
+					assert(stub.isChanged);
+					assert(!stub.isDeleted);
+					assert.deepEqual(stub.changedFiles, ["temp/a"]);
+				})
+				.done(done);
+		});
+
+		it("delete", function (done) {
+			w = Watcher(["temp/a"], opts(), stub.callback);
+
+			stub
+				.tap(create("temp/a"))
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(rm("temp/a"))
+				.expectDelete("temp/a")
+				.tap(function () {
+					assert(!stub.isCreated);
+					assert(!stub.isChanged);
+					assert(stub.isDeleted);
+					assert.deepEqual(stub.deletedFiles, ["temp/a"]);
+				})
+				.done(done);
+		});
+		it("multiple events", function (done) {
+			w = Watcher(["temp/a"], opts(), stub.callback);
+
+			stub
+				.tap(create("temp/a"))
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(change("temp/a"))
+				.expectChange("temp/a")
+				.tap(change("temp/a"))
+				.expectChange("temp/a")
+				.tap(function () {
+					assert(!stub.isCreated);
+					assert(stub.isChanged);
+					assert(!stub.isDeleted);
+					assert.deepEqual(stub.changedFiles, ["temp/a", "temp/a"]);
+				})
+				.done(done);
+		});
+
+
+		it("handle only some actions", function (done) {
+			w = Watcher(["temp/a"], opts({ actions: ["delete"] }), stub.callback);
+
+			stub
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(create("temp/a"))
+				.wait()
+				.tap(change("temp/a"))
+				.wait()
+				.tap(rm("temp/a"))
+				.expectDelete("temp/a")
+				.tap(function () {
+					assert(!stub.isCreated);
+					assert(!stub.isChanged);
+					assert(stub.isDeleted);
+					assert.deepEqual(stub.deletedFiles, ["temp/a"]);
+				})
+				.done(done);
+		});
 	});
 
-	it("on change", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
+	describe("cmd", function () {
+		it("cmd exec", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "exec", writeToConsole: true }), stub.execCmd);
 
-		stub
-			.tap(create("temp/a"))
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(change("temp/a"))
-			.expectChange("temp/a")
-			.done(done);
-	});
+			stub
+				.tap(create("temp/a"))
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(change("temp/a"))
+				.expectExec()
+				.tap(function () {
+					//assert.deepEqual(stub.changedFiles, ["temp/a"]);
+				})
+				.done(done);
+		});
 
-	it("on change multiple", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
+		it("cmd restart", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "reload", writeToConsole: true }), stub.reloadCmd);
 
-		stub
-			.tap(create("temp/a"))
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(change("temp/a"))
-			.expectChange("temp/a")
-			.tap(change("temp/a"))
-			.expectChange("temp/a")
-			.done(done);
-	});
+			stub
+				.tap(create("temp/a"))
+				.tap(w.start.bind(w))
+				.waitExec() // to make sure cmd is fully loaded
+				.tap(change("temp/a"))
+				.expectExec()
+				.done(done);
+		});
 
-	it("on delete", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec" }), stub.callback);
+		it("cmd restart, exiting cmd", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "reload", restartOnSuccess: false }), stub.execCmd);
 
-		stub
-			.tap(create("temp/a"))
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(rm("temp/a"))
-			.expectDelete("temp/a")
-			.done(done);
-	});
+			stub
+				.tap(create("temp/a"))
+				.tap(w.start.bind(w))
+				.waitExec().wait() // to make sure cmd is exited
+				.tap(change("temp/a"))
+				.expectExec()
+				.done(done);
+		});
 
-	it("handle only some actions", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec", actions: ["delete"] }), stub.callback);
+		it("cmd restart on error", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "reload", restartOnSuccess: false, restartOnError: true }), stub.execCrashCmd);
 
-		stub
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(create("temp/a"))
-			.wait()
-			.tap(change("temp/a"))
-			.wait()
-			.tap(rm("temp/a"))
-			.expectDelete("temp/a")
-			.tap(function () {
-				assert(!stub.isCreated);
-				assert(!stub.isChanged);
-			})
-			.done(done);
-	});
+			stub
+				.tap(w.start.bind(w))
+				.expectExec()
+				.expectExec()
+				.done(done);
+		});
 
-	it("cmd exec", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "exec", writeToConsole: true }), stub.execCmd);
+		it("cmd don't restart on error", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "reload", restartOnSuccess: false, restartOnError: false, writeToConsole: true }), stub.execCrashCmd);
 
-		stub
-			.tap(create("temp/a"))
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(change("temp/a"))
-			.expectExec()
-			.done(done);
-	});
+			stub
+				.tap(w.start.bind(w))
+				.expectExec()
+				.wait(3000)
+				.tap(function () {
+					assert.equal(stub.execTimes, 1);
+					assert(!stub.isCmdReloaded);
+				})
+				.done(done);
+		});
+		
+		it("cmd restart on success", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "reload", restartOnSuccess: true, restartOnError: false }), stub.execCmd);
 
-	it("cmd restart", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", writeToConsole: true }), stub.reloadCmd);
+			stub
+				.tap(w.start.bind(w))
+				.expectExec()
+				.expectExec()
+				.done(done);
+		});
 
-		stub
-			.tap(create("temp/a"))
-			.tap(w.start.bind(w))
-			.waitExec() // to make sure cmd is fully loaded
-			.tap(change("temp/a"))
-			.expectExec()
-			.done(done);
-	});
+		it("cmd don't restart on success", function (done) {
+			w = Watcher(["temp/a"], opts({ type: "reload", restartOnSuccess: false, restartOnError: false }), stub.execCmd);
 
-	it("cmd restart, exiting cmd", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false }), stub.execCmd);
+			stub
+				.tap(w.start.bind(w))
+				.expectExec()
+				.wait(500)
+				.tap(function () {
+					assert.equal(stub.execTimes, 1);
+					assert(!stub.isCmdReloaded);
+				})
+				.done(done);
+		});
+		
+		it("runSeparate == true", function (done) {
+			w = Watcher(["temp/a", "temp/b"], opts({ type: "exec", runSeparate: true, debounce: 100 }), stub.execCmd);
 
-		stub
-			.tap(create("temp/a"))
-			.tap(w.start.bind(w))
-			.waitExec().wait() // to make sure cmd is exited
-			.tap(change("temp/a"))
-			.expectExec()
-			.done(done);
-	});
+			stub
+				.tap(create("temp/a"))
+				.tap(create("temp/b"))
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(change("temp/a"))
+				.tap(change("temp/b"))
+				.wait(2000)
+				.tap(function () {
+					assert.equal(stub.execTimes, 2);
+				})
+				.done(done);
+		});
 
-	it("cmd restart on error", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false, restartOnError: true }), stub.execCrashCmd);
+		it("runSeparate == false", function (done) {
+			w = Watcher(["temp/a", "temp/b"], opts({ type: "exec", runSeparate: false, debounce: 100 }), stub.execCmdBatch);
 
-		stub
-			.tap(w.start.bind(w))
-			.expectExec()
-			.expectExec()
-			.done(done);
-	});
-
-	it("cmd don't restart on error", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false, restartOnError: false, writeToConsole: true }), stub.execCrashCmd);
-
-		stub
-			.tap(w.start.bind(w))
-			.expectExec()
-			.wait(3000)
-			.tap(function () {
-				assert.equal(stub.execTimes, 1);
-				assert(!stub.isCmdReloaded);
-			})
-			.done(done);
-	});
-	
-	it("cmd restart on success", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: true, restartOnError: false }), stub.execCmd);
-
-		stub
-			.tap(w.start.bind(w))
-			.expectExec()
-			.expectExec()
-			.done(done);
-	});
-
-	it("cmd don't restart on success", function (done) {
-		w = Watcher(["temp/a"], assign({}, defaultOptions, { type: "reload", restartOnSuccess: false, restartOnError: false }), stub.execCmd);
-
-		stub
-			.tap(w.start.bind(w))
-			.expectExec()
-			.wait(500)
-			.tap(function () {
-				assert.equal(stub.execTimes, 1);
-				assert(!stub.isCmdReloaded);
-			})
-			.done(done);
-	});
-	
-	it("runSeparate == true", function (done) {
-		w = Watcher(["temp/a", "temp/b"], assign({}, defaultOptions, { type: "exec", runSeparate: true, debounce: 100 }), stub.execCmd);
-
-		stub
-			.tap(create("temp/a"))
-			.tap(create("temp/b"))
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(change("temp/a"))
-			.tap(change("temp/b"))
-			.wait(2000)
-			.tap(function () {
-				assert.equal(stub.execTimes, 2);
-			})
-			.done(done);
-	});
-
-	it("runSeparate == false", function (done) {
-		w = Watcher(["temp/a", "temp/b"], assign({}, defaultOptions, { type: "exec", runSeparate: false, debounce: 100 }), stub.execCmdBatch);
-
-		stub
-			.tap(create("temp/a"))
-			.tap(create("temp/b"))
-			.tap(w.start.bind(w))
-			.wait()
-			.tap(change("temp/a"))
-			.tap(change("temp/b"))
-			.wait(2000)
-			.tap(function () {
-				assert.equal(stub.execTimes, 1);
-			})
-			.done(done);
+			stub
+				.tap(create("temp/a"))
+				.tap(create("temp/b"))
+				.tap(w.start.bind(w))
+				.wait()
+				.tap(change("temp/a"))
+				.tap(change("temp/b"))
+				.wait(2000)
+				.tap(function () {
+					assert.equal(stub.execTimes, 1);
+				})
+				.done(done);
+		});
 	});
 
 	it(".stop() terminates reloading cmd during reload");
