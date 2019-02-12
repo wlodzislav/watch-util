@@ -457,16 +457,14 @@ Watcher.prototype._terminateChild = function (callback) {
 
 Watcher.prototype._execChildBatch = function (filePaths, callback) {
 	var cmd;
-	if (this._ruleOptions.cmdOrFun.indexOf("${") !== -1) {
+	if (this._ruleOptions.cmdOrFun.indexOf("%") !== -1) {
 		var cwd = path.resolve(".")
 		var relFiles = filePaths;
 		var files = filePaths.map(function (f) { return path.resolve(f); });
-		var body = "var cwd = \"" + cwd + "\";"
-			+ "var relFiles = " + JSON.stringify(relFiles) + ";"
-			+ "var files = " + JSON.stringify(files) + ";"
-			+ "return `" + this._ruleOptions.cmdOrFun.replace(/\\/g, "\\\\") + "`;";
-		var func = new Function(body);
-		var cmd = func();
+		cmd = this._ruleOptions.cmdOrFun
+			.replace("%cwd", cwd)
+			.replace("%relFiles", relFiles)
+			.replace("%files", files);
 	} else {
 		cmd = this._ruleOptions.cmdOrFun;
 	}
@@ -504,24 +502,23 @@ Watcher.prototype._execChildBatch = function (filePaths, callback) {
 
 Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
 	var cmd;
-	if (this._ruleOptions.cmdOrFun.indexOf("${") !== -1) {
+	if (this._ruleOptions.cmdOrFun.indexOf("%") !== -1) {
 		var cwd = path.resolve(".")
 		var relFile = filePath;
 		var file = path.resolve(filePath);
 		var relDir = path.dirname(filePath);
 		var dir = path.resolve(path.dirname(filePath));
-		var body = "var cwd = \"" + cwd + "\";"
-			+ "var relFile = \"" +relFile + "\";"
-			+ "var file = \"" + file + "\";"
-			+ "var relDir = \"" + relDir + "\";"
-			+ "var dir = \"" + dir + "\";"
-			+ "var action = \"" + action + "\";"
-			+ "return `" + this._ruleOptions.cmdOrFun.replace(/\\/g, "\\\\") + "`;";
-		var func = new Function(body);
-		cmd = func();
+		cmd = this._ruleOptions.cmdOrFun
+			.replace("%cwd", cwd)
+			.replace("%action", action)
+			.replace("%relFile", relFile)
+			.replace("%file", file)
+			.replace("%relDir", relDir)
+			.replace("%dir", dir);
 	} else {
 		cmd = this._ruleOptions.cmdOrFun;
 	}
+	console.log(cmd);
 	var childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
 		useShell: this.getOption("useShell"),

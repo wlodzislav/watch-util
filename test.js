@@ -1,14 +1,9 @@
 var assert = require("assert");
 var fs = require("fs");
-var EventEmitter = require('events');
-var express = require("express");
-var bodyParser = require("body-parser");
-var deepEqual = require('deep-equal');
-
+var path = require("path");
 var shelljs = require("shelljs");
 
 var Watcher = require("./watcher");
-var assign = require("./utils").assign;
 
 var _port = 8555;
 function Stub() {
@@ -28,51 +23,42 @@ function Stub() {
 	this.isCmdReloaded = false;
 	this.reloadTimes = 0;
 
-	this.execCmd = "node test-helper.js --port " + this.port + " --type exec -- ${relFile}";
-	this.execCmdBatch = "node test-helper.js --port " + this.port + " --type exec -- ${relFiles}";
+	this.execCmd = "node test-helper.js --type exec --cwd %cwd -- %relFiles -- %files";
+	this.execCmdSeparate = "node test-helper.js --type exec --action-value %action --cwd %cwd --rel-file %relFile --file %file --rel-dir %relDir --dir %dir";
 	this.execCrashCmd = "node test-helper.js --port " + this.port + " --type exec --exit 1";
 	this.reloadCmd = "node test-helper.js --port " + this.port + " --type reload";
 
 	this.actions = [];
-
-	this._app = express();
-	this._app.use(bodyParser.json());
-
-	this._app.post("/exec", function (req, res) {
-		var fileNames = req.body.fileNames;
-		res.send({});
-
-		this.isCmdExecuted = true;
-		this.execTimes++;
-
-		if (this._waitEvent) {
-			this._waitEvent({ action: "exec", fileNames });
-		}
-	}.bind(this));
-
-	this._app.get("/reload", function (req, res) {
-		res.send({});
-
-		this.isCmdReloaded = true;
-		this.reloadTimes++;
-
-		if (this._waitEvent) {
-			this._waitEvent({ action: "reload" });
-		}
-	}.bind(this));
-
 	this.events = [];
 	this.callback = this.callback.bind(this);
 
 	this._started = false;
+	this._nextLogLineIndex = 0;
 }
 
 Stub.prototype.start = function (callback) {
-	this._server = this._app.listen(this.port, callback);
+	this._pollInterval = setInterval(function () {
+		try {
+			var content = fs.readFileSync(path.join(__dirname, "log"), "utf8")
+			var lines = content.split("\n");
+			lines.slice(this._nextLogLineIndex).filter(Boolean).forEach(function (raw) {
+				var entry = JSON.parse(raw);
+				if (this._waitEvent) {
+					console.log(entry);
+					this._nextLogLineIndex += 1;
+					this._waitEvent(entry);
+				}
+			}.bind(this));
+		} catch (err) {
+			if (err.code != "ENOENT") {
+				throw err;
+			}
+		}
+	}.bind(this), 50);
 };
 
 Stub.prototype.stop = function () {
-	this._server.close();
+	clearInterval(this._pollInterval);
 };
 
 Stub.prototype._runActions = function (callback) {
@@ -115,6 +101,7 @@ Stub.prototype.callback = function () {
 
 Stub.prototype.next = function () {
 	var a = this.actions.shift();
+	//console.log("next", a);
 	if (!a) {
 		return this.done();
 	}
@@ -134,14 +121,15 @@ Stub.prototype.next = function () {
 		}
 		this._expectedEvent = a.event;
 		this._waitEvent = function (event) {
-			if (this._expectedEvent.action == "exec" && event.action == "exec" && !this._expectedEvent.fileNames) {
-				// ok
-			} else {
-				try {
-					assert.deepEqual(this._expectedEvent, event);
-				} catch (err) {
-					return this.done(err);
-				}
+			//console.log(event);
+			var copy = {};
+			for (var key in this._expectedEvent) {
+				copy[key] = event[key];
+			}
+			try {
+				assert.deepEqual(copy, this._expectedEvent);
+			} catch (err) {
+				return this.done(err);
 			}
 			this._waitEvent = null;
 			this._expectedEvent = null;
@@ -190,7 +178,7 @@ Stub.prototype.expectExec = function (fileNames) {
 	if (fileNames && !Array.isArray(fileNames)) {
 		fileNames = [fileNames];
 	}
-	this.actions.push({ action: "waitEvent", event: { action: "exec", fileNames: fileNames }});
+	this.actions.push({ action: "waitEvent", event: { event: "exec", fileNames: fileNames }});
 	this._runActions();
 	return this;
 };
@@ -198,7 +186,7 @@ Stub.prototype.expectExec = function (fileNames) {
 Stub.prototype.waitExec = Stub.prototype.expectExec;
 
 Stub.prototype.expectReload = function () {
-	this.actions.push({ action: "waitEvent", event: { action: "reload" }});
+	this.actions.push({ action: "waitEvent", event: { event: "reload" }});
 	this._runActions();
 	return this;
 };
@@ -228,10 +216,11 @@ describe("", function () {
 	this.slow(500);
 
 	var stub, w;
-	beforeEach(function (done) {
+	beforeEach(function () {
 		shelljs.mkdir("-p", "temp");
+		shelljs.rm("-f", "log");
 		stub = new Stub();
-		stub.start(done);
+		stub.start();
 	});
 
 	afterEach(function (done) {
@@ -241,15 +230,22 @@ describe("", function () {
 		w.stop(done);
 	});
 
-	var defaultOptions = { reglob: 50, debounce: 0, mtimeCheck: false, runSeparate: true, useShell: false };
+	var defaultOptions = {
+		reglob: 50,
+		debounce: 0,
+		mtimeCheck: false,
+		runSeparate: false,
+		useShell: false,
+		writeToConsole: false,
+	};
 
 	function opts(options) {
 		return Object.assign({}, defaultOptions, options || {});
 	}
 
-	describe("handle events", function () {
+	describe.only("handle events", function () {
 		it("create", function (done) {
-			w = new Watcher(["temp/a"], opts(), stub.callback);
+			w = new Watcher(["temp/a"], opts({ runSeparate: true }), stub.callback);
 
 			stub
 				.tap(w.start.bind(w))
@@ -266,7 +262,7 @@ describe("", function () {
 		});
 
 		it("change", function (done) {
-			w = Watcher(["temp/a"], opts(), stub.callback);
+			w = Watcher(["temp/a"], opts({ runSeparate: true }), stub.callback);
 
 			stub
 				.tap(create("temp/a"))
@@ -284,7 +280,7 @@ describe("", function () {
 		});
 
 		it("delete", function (done) {
-			w = Watcher(["temp/a"], opts(), stub.callback);
+			w = Watcher(["temp/a"], opts({ runSeparate: true }), stub.callback);
 
 			stub
 				.tap(create("temp/a"))
@@ -301,7 +297,7 @@ describe("", function () {
 				.done(done);
 		});
 		it("multiple events", function (done) {
-			w = Watcher(["temp/a"], opts(), stub.callback);
+			w = Watcher(["temp/a"], opts({ runSeparate: true }), stub.callback);
 
 			stub
 				.tap(create("temp/a"))
@@ -322,7 +318,7 @@ describe("", function () {
 
 
 		it("handle only some actions", function (done) {
-			w = Watcher(["temp/a"], opts({ actions: ["delete"] }), stub.callback);
+			w = Watcher(["temp/a"], opts({ actions: ["delete"], runSeparate: true }), stub.callback);
 
 			stub
 				.tap(w.start.bind(w))
@@ -432,7 +428,7 @@ describe("", function () {
 		});
 		
 		it("runSeparate == true", function (done) {
-			w = Watcher(["temp/a", "temp/b"], opts({ type: "exec", runSeparate: true, debounce: 100 }), stub.execCmd);
+			w = Watcher(["temp/a", "temp/b"], opts({ type: "exec", runSeparate: true, debounce: 100 }), stub.execCmdSeparate);
 
 			stub
 				.tap(create("temp/a"))
@@ -449,7 +445,7 @@ describe("", function () {
 		});
 
 		it("runSeparate == false", function (done) {
-			w = Watcher(["temp/a", "temp/b"], opts({ type: "exec", runSeparate: false, debounce: 100 }), stub.execCmdBatch);
+			w = Watcher(["temp/a", "temp/b"], opts({ type: "exec", runSeparate: false, debounce: 100 }), stub.execCmd);
 
 			stub
 				.tap(create("temp/a"))
