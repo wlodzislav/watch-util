@@ -245,9 +245,9 @@ Watcher.prototype.start = function (callback) {
 	if (this._ruleOptions.cmd) {
 		if (this._ruleOptions.type === "exec") {
 			if (this.getOption("combineEvents")) {
-				this._ruleOptions.callback = this._execChildBatch.bind(this);
+				this._ruleOptions.callback = this._execCmd.bind(this);
 			} else {
-				this._ruleOptions.callback = this._execChildSeparateEach.bind(this);
+				this._ruleOptions.callback = this._execCmd.bind(this);
 			}
 		} else {
 			//this._ruleOptions.callback = this._restartChild.bind(this);
@@ -463,74 +463,39 @@ Watcher.prototype._terminateChild = function (callback) {
 	}
 };
 
-Watcher.prototype._execChildBatch = function (filePaths) {
-	var cmd;
-	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
-		var cwd = path.resolve(".")
-		var relFiles = filePaths;
-		var files = filePaths.map(function (f) { return path.resolve(f); });
-		cmd = this._ruleOptions.cmd
-			.replace("%cwd", cwd)
-			.replace("%relFiles", relFiles)
-			.replace("%files", files);
+Watcher.prototype._execCmd = function () {
+	var combined;
+	if (arguments.length == 1) {
+		combined = true;
+		var filePaths = arguments[0];
 	} else {
-		cmd = this._ruleOptions.cmd;
+		combined = false;
+		var filePath = arguments[0];
+		var action = arguments[1];
 	}
 
-	if (this.getOption("debug")) {
-		debug(chalk.green("Exec ") + cmd);
-	}
-
-	var child = exec(cmd, {
-		writeToConsole: this.getOption("writeToConsole"),
-		useShell: this.getOption("useShell"),
-		customShell: this.getOption("customShell"),
-		debug: this.getOption("debug")
-	});
-
-	child.stdout.on("data", function (buffer) {
-		var text = buffer.toString();
-		if (this.getOption("writeToConsole")) {
-			console.log(text.replace(/\n$/, ""));
-		}
-		this._writeLog({ stream: "stdout", text: text });
-	}.bind(this));
-
-	child.stderr.on("data", function (buffer) {
-		var text = buffer.toString();
-		if (this.getOption("writeToConsole")) {
-			console.error(text.replace(/\n$/, ""));
-		}
-		this._writeLog({ stream: "stderr", text: text });
-	}.bind(this));
-
-	child.on("exit", function () {
-		setTimeout(function () { // to prevent call stack error
-			delete this._processes["*"];
-		}.bind(this), 0);
-	}.bind(this));
-
-	this._processes["*"] = child;
-};
-
-Watcher.prototype._execChildSeparateQueue = function (changed) {
-}
-
-Watcher.prototype._execChildSeparateEach = function (filePath, action) {
 	var cmd;
 	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
-		var cwd = path.resolve(".")
-		var relFile = filePath;
-		var file = path.resolve(filePath);
-		var relDir = path.dirname(filePath);
-		var dir = path.resolve(path.dirname(filePath));
+		if (combined) {
+			var cwd = path.resolve(".")
+			var relFiles = filePaths.join(" ");
+			var files = filePaths.map(function (f) { return path.resolve(f); }).join(" ");
+		} else {
+			var cwd = path.resolve(".")
+			var relFile = filePath;
+			var file = path.resolve(filePath);
+			var relDir = path.dirname(filePath);
+			var dir = path.resolve(path.dirname(filePath));
+		}
 		cmd = this._ruleOptions.cmd
 			.replace("%cwd", cwd)
-			.replace("%event", action)
-			.replace("%relFile", relFile)
-			.replace("%file", file)
-			.replace("%relDir", relDir)
-			.replace("%dir", dir);
+			.replace("%relFiles", relFiles || "")
+			.replace("%files", files || "")
+			.replace("%event", action || "")
+			.replace("%relFile", relFile || "")
+			.replace("%file", file || "")
+			.replace("%relDir", relDir || "")
+			.replace("%dir", dir || "");
 	} else {
 		cmd = this._ruleOptions.cmd;
 	}
@@ -567,12 +532,20 @@ Watcher.prototype._execChildSeparateEach = function (filePath, action) {
 			return;
 		}
 		if (this.getOption("restartOnError") && code != 0) {
-			this._execChildSeparateEach(filePath, action);
+			this._execCmd(filePath, action);
 		}
-		delete this._processes[filePath];
+		if (combined) {
+			delete this._processes["*"];
+		} else {
+			delete this._processes[filePath];
+		}
 	}.bind(this));
 	
-	this._processes[filePath] = child;
+	if (combined) {
+		this._processes["*"] = child;
+	} else {
+		this._processes[filePath] = child;
+	}
 };
 
 Watcher.prototype._runRestartingChild = function () {
