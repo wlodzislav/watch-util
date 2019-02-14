@@ -1,7 +1,7 @@
 var assert = require("assert");
 var fs = require("fs");
 var path = require("path");
-var EventEmitter = require('events');
+var EventEmitter = require("events");
 
 var touch = require("touch");
 var rimraf = require("rimraf");
@@ -11,8 +11,6 @@ var Watcher = require("./watcher");
 function opts(options) {
 	return Object.assign({}, defaultOptions, options || {});
 }
-
-var w;
 
 var callbackArguments = [];
 var callback = function () {
@@ -59,6 +57,7 @@ function expectNoCallback(delay, callback) {
 		callback(new Error("Callback is called with arguments " + [].join.call(arguments, ", ")));
 	};
 	if (callbackArguments.length) {
+		clearTimeout(timeout);
 		var args = callbackArguments.shift();
 		_callback.apply(null, args);
 	}
@@ -74,7 +73,91 @@ function rm(f) {
 	rimraf.sync(f);
 }
 
+function CMDHelper() {
+	this._events = [];
+	this.tmp = path.join(__dirname, "log");
+	this.start();
+
+	this.execCmdCombined = "node test-helper.js --type exec --cwd %cwd -- %relFiles -- %files";
+	this.execCmd = "node test-helper.js --type exec --event %event %cwd --rel-file %relFile --file %file --rel-dir %relDir --dir %dir";
+	this.execCrashCmd = "node test-helper.js --type exec --exit 1";
+	this.reloadCmd = "node test-helper.js --type reload --cwd %cwd -- %relFiles -- %files";
+}
+
+CMDHelper.prototype.expectEvent = function () {
+	if (arguments.length == 3) {
+		var event = arguments[0];
+		var options = arguments[1];
+		var callback = arguments[2];
+	} else {
+		var event = arguments[0];
+		var options = {};
+		var callback = arguments[1];
+	}
+	this._callback = function (e) {
+		var copy = {};
+		for (var key in options) {
+			copy[key] = e.data[key];
+		}
+		assert.deepEqual(e.event, event);
+		assert.deepEqual(copy, options);
+		this._callback = null;
+		callback();
+	}
+	if (callbackArguments.length) {
+		var args = this._events.shift();
+		this._callback.apply(null, args);
+	}
+}
+
+CMDHelper.prototype.expectNoEvents = function (delay, callback) {
+	var timeout = setTimeout(callback, delay);
+
+	this._callback = function (e) {
+		clearTimeout(timeout);
+		this._callback = null;
+		callback(new Error("Expect no events but received " + JSON.stringify(e)));
+	}
+	if (callbackArguments.length) {
+		clearTimeout(timeout);
+		var args = this._events.shift();
+		this._callback.apply(null, args);
+	}
+}
+
+CMDHelper.prototype.start = function () {
+	this._nextLogLineIndex = 0;
+	this._pollInterval = setInterval(function () {
+		try {
+			var content = fs.readFileSync(this.tmp, "utf8")
+			var lines = content.split("\n");
+			lines.slice(this._nextLogLineIndex).filter(Boolean).forEach(function (raw) {
+				var entry = JSON.parse(raw);
+				//console.log(entry);
+				this._nextLogLineIndex += 1;
+				if (this._callback) {
+					this._callback.apply(null, [entry]);
+				} else {
+					this._events.push([entry]);
+				}
+			}.bind(this));
+		} catch (err) {
+			if (err.code != "ENOENT") {
+				throw err;
+			}
+		}
+	}.bind(this), 50);
+};
+
+CMDHelper.prototype.clean = function () {
+	try {
+		fs.unlinkSync(this.tmp);
+	} catch (err) {}
+};
+
 describe("Watching", function () {
+	var w;
+
 	beforeEach(function () {
 		rimraf.sync("temp");
 		fs.mkdirSync("temp");
@@ -209,21 +292,67 @@ describe("Watching", function () {
 });
 
 describe("Running", function () {
+	var helper;
+	beforeEach(function () {
+		rimraf.sync("temp");
+		fs.mkdirSync("temp");
+		helper = new CMDHelper();
+	});
+
+	afterEach(function (done) {
+		rimraf.sync("temp");
+		helper.clean();
+		w.stop(done);
+	});
+
+	it("run cmd", function (done) {
+		w = new Watcher(["temp/a"], helper.execCmd);
+
+		create("temp/a");
+		w.start(function () {
+			change("temp/a");
+			helper.expectEvent("run", done);
+		});
+	});
+
+	it.skip(".restartOnError == true", function (done) {
+		w = new Watcher(["temp/a"], { restartOnError: true, writeToConsole: true, debug: true }, helper.execCrashCmd);
+
+		create("temp/a");
+		w.start(function () {
+			change("temp/a");
+			helper.expectEvent("run", function () {
+				helper.expectEvent("run", done);
+			});
+		});
+	});
+
+	it.skip(".restartOnError == false", function (done) {
+		w = new Watcher(["temp/a"], helper.execCrashCmd);
+
+		create("temp/a");
+		w.start(function () {
+			change("temp/a");
+			helper.expectEvent("run", function () {
+				helper.expectNoEvents(500, done);
+			});
+		});
+	});
+
+	it(".restartOnSuccess == true");
+	it(".restartOnSuccess == false");
+
+	it(".restartOnEvent == true");
+	it(".restartOnEvent == false");
+
+	it(".restart");
+
 	it(".useShell == true");
 	it(".useShell == false");
 
 	it(".customShell");
 
-	it(".type == exec");
-	it(".type == reload");
-
 	it(".throttle");
-
-	it(".restartOnError == true");
-	it(".restartOnError == false");
-
-	it(".restartOnSuccess == true");
-	it(".restartOnSuccess == false");
 
 	it(".parallelLimit");
 

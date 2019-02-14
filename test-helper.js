@@ -5,7 +5,7 @@ var program = require("commander");
 program
 	.option("--type <value>", "")
 	.option("--exit <value>", "")
-	.option("--action-value <value>", "")
+	.option("--event <value>", "")
 	.option("--cwd <value>", "")
 	.option("--rel-file <value>", "")
 	.option("--file <value>", "")
@@ -14,14 +14,17 @@ program
 
 program.parse(process.argv);
 
-function sendSync(event, data) {
+function sendEventSync(event, data) {
+	//console.log("send", event, data);
 	fs.appendFileSync(path.join(__dirname, "log"), JSON.stringify({ event, data }) + "\n", "utf8");
 
 }
 
+sendEventSync("run", data);
+
 if (program.type === "reload") {
 	function onSig() {
-		sendSync("reloaded")
+		sendEventSync("reloaded")
 		process.exit(program.exit || 0);
 	}
 
@@ -34,7 +37,7 @@ if (program.type === "reload") {
 
 	var data = {
 		timestamp: Date.now(),
-		action: program.actionValue,
+		event: program.event,
 		cwd: program.cwd,
 		relFile: program.relFile,
 		file: program.file,
@@ -57,7 +60,6 @@ if (program.type === "reload") {
 		}
 	}
 
-	sendSync("exec", data);
 	process.exit(program.exit || 0);
 }
 

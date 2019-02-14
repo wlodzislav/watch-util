@@ -36,6 +36,7 @@ function genUID() {
 }
 
 var defaultOptions = {
+	type: "exec",
 	debounce: 200, // exec/reload once in ms at max
 	reglob: 50, // perform reglob to watch added files
 	restartOnError: false, // restart if exit code != 0
@@ -176,16 +177,13 @@ function Watcher() {
 		}
 	}
 
-	this._ruleOptions = options ? Object.assign({}, options) : {};
+	this._ruleOptions = Object.assign({}, defaultOptions, options || {});
 	this._ruleOptions.globs = globs;
 	this._ruleOptions.cmd = cmd;
 	this._ruleOptions.callback = callback;
 
 	this.id = this._ruleOptions.id || genUID();
 
-	if (!this._ruleOptions.type) {
-		this._ruleOptions.type = "reload";
-	}
 	if (this._ruleOptions.callback) {
 		this._ruleOptions.type = "exec";
 	}
@@ -244,10 +242,21 @@ Watcher.prototype.start = function (callback) {
 	this._firstTime = true;
 	this._changed = {};
 
+	if (this._ruleOptions.cmd) {
+		if (this._ruleOptions.type === "exec") {
+			if (this.getOption("combineEvents")) {
+				this._ruleOptions.callback = this._execChildBatch.bind(this);
+			} else {
+				this._ruleOptions.callback = this._execChildSeparateEach.bind(this);
+			}
+		} else {
+			this._ruleOptions.callback = this._restartChild.bind(this);
+		}
+	}
+
+	//console.log(this._ruleOptions);
 	if (this._ruleOptions.type === "exec") {
-		this._execCallbackDebounced = debounce(this._execCallback.bind(this), this.getOption("debounce"));
-	} else {
-		this._restartChildDebounced = debounce(this._restartChild.bind(this), this.getOption("debounce"));
+		this._callbackCombinedDebounced = debounce(this._callbackCombined.bind(this), this.getOption("debounce"));
 	}
 
 	this._reglob();
@@ -265,19 +274,27 @@ Watcher.prototype.start = function (callback) {
 	}
 };
 
-
-Watcher.prototype._execCallback = function (filePath, action) {
+Watcher.prototype._callbackCombined = function () {
+	if (this.getOption("debug")) {
+		debugLog(chalk.green("Call") + " callback for " + chalk.yellow(Object.keys(this._changed).join(", ")));
+	}
 	this._ruleOptions.callback(Object.keys(this._changed));
 	this._changed = {};
 }
 
-Watcher.prototype._execCallbackFor = function (filePath) {
+Watcher.prototype._callbackSingle = function (filePath) {
 	var action = this._changed[filePath].action;
+	if (this.getOption("debug")) {
+		debugLog(chalk.green("Call") + " callback for path=" + chalk.yellow(filePath) + " action=" + action);
+	}
 	this._changed[filePath] = null;
 	this._ruleOptions.callback(filePath, action);
 }
 
 Watcher.prototype._onWatcherEvent = function (filePath, action) {
+	if (this.getOption("debug")) {
+		debugLog(chalk.green("Fire") + " watcher: path=" + chalk.yellow(filePath) + " action=" + action);
+	}
 	var events = this.getOption("events");
 	if (events.indexOf(action) == -1) {
 		return;
@@ -286,26 +303,17 @@ Watcher.prototype._onWatcherEvent = function (filePath, action) {
 
 	if (this._ruleOptions.type === "exec") {
 		if (this.getOption("combineEvents")) {
-			this._execCallbackDebounced();
+			this._callbackCombinedDebounced();
 		} else {
 			if (!this._debouncers[filePath]) {
-				this._debouncers[filePath] = debounce(this._execCallbackFor.bind(this, filePath), this.getOption("debounce"));
+				this._debouncers[filePath] = debounce(this._callbackSingle.bind(this, filePath), this.getOption("debounce"));
 			}
 			this._debouncers[filePath]();
 		}
 	} else {
 		this._changed[filePath] = { action: action, filePath: filePath };
-		this._restartChildDebounced();
+		this._callbackCombinedDebounced();
 	}
-};
-
-Watcher.prototype._runCombine = function () {
-	this._ruleOptions.callback(Object.keys(this._changed));
-	this._changed = {};
-};
-
-Watcher.prototype._runEach = function (fileName) {
-	this._ruleOptions.callback(fileName, action);
 };
 
 Watcher.prototype._reglob = function () {
@@ -319,7 +327,7 @@ Watcher.prototype._reglob = function () {
 			var rewatch = function () {
 				if (this._watchers[p]) {
 					if (this.getOption("debug")) {
-						debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
+						debugLog(chalk.red("Deleted")+" watcher: path=" + chalk.yellow(p));
 					}
 					this._watchers[p].close();
 				} else {
@@ -331,9 +339,6 @@ Watcher.prototype._reglob = function () {
 					return setTimeout(reglob, 0);
 				}
 				this._watchers[p] = fs.watch(p, function (action) {
-					if (this.getOption("debug")) {
-						debugLog(chalk.green("Fire")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id+" action="+action);
-					}
 					try {
 						stat = fs.statSync(p);
 					} catch (err) {
@@ -358,8 +363,7 @@ Watcher.prototype._reglob = function () {
 					}
 				}.bind(this));
 				if (this.getOption("debug")) {
-					this._watchers[p].id = genUID();
-					debugLog(chalk.green("Created")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
+					debugLog(chalk.green("Created")+" watcher: path=" + chalk.yellow(p));
 				}
 			}.bind(this);
 
@@ -500,28 +504,9 @@ Watcher.prototype._execChildBatch = function (filePaths) {
 };
 
 Watcher.prototype._execChildSeparateQueue = function (changed) {
-	var fileNames = Object.keys(changed);
-	async.eachLimit(fileNames, this.getOption("parallelLimit"), function (fileName, callback) {
-		if (this._runState !== "running") {
-			return callback();
-		}
-		var action = changed[fileName].action;
-		delete changed[fileName];
-		this._execChildSeparateEach(fileName, action, callback);
-	}.bind(this), function () {
-		if (this._runState !== "running") {
-			return;
-		}
-		if (Object.keys(this._changed).length) {
-			setTimeout(function () { // to prevent call stack error
-				this._execChildSeparate(this._changed);
-				this._changed = {};
-			}.bind(this), 0);
-		}
-	});
 }
 
-Watcher.prototype._execChildSeparateEach = function (filePath, action, callback) {
+Watcher.prototype._execChildSeparateEach = function (filePath, action) {
 	var cmd;
 	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
 		var cwd = path.resolve(".")
@@ -531,7 +516,7 @@ Watcher.prototype._execChildSeparateEach = function (filePath, action, callback)
 		var dir = path.resolve(path.dirname(filePath));
 		cmd = this._ruleOptions.cmd
 			.replace("%cwd", cwd)
-			.replace("%action", action)
+			.replace("%event", action)
 			.replace("%relFile", relFile)
 			.replace("%file", file)
 			.replace("%relDir", relDir)
@@ -565,7 +550,6 @@ Watcher.prototype._execChildSeparateEach = function (filePath, action, callback)
 	childRunning.on("exit", function () {
 		var index = this._childrenRunning.indexOf(childRunning);
 		this._childrenRunning.splice(index, 1);
-		callback();
 	}.bind(this));
 	
 	if (!this._childrenRunning) {
