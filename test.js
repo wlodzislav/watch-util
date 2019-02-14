@@ -85,7 +85,7 @@ function CMDHelper() {
 }
 
 CMDHelper.prototype.cmd = function (args) {
-	return "node test-helper.js --type exec --event %event %cwd --rel-file %relFile --file %file --rel-dir %relDir --dir %dir "
+	return "node test-helper.js --event %event %cwd --rel-file %relFile --file %file --rel-dir %relDir --dir %dir "
 		+ args
 		+ " --log " + this.tmp
 		+ " -- %relFiles -- %files";
@@ -146,6 +146,9 @@ CMDHelper.prototype.start = function () {
 			var lines = content.split("\n");
 			lines.slice(this._nextLogLineIndex).filter(Boolean).forEach(function (raw) {
 				var entry = JSON.parse(raw);
+				if (entry.event == "crash") {
+					throw new Error("Helper crashed");
+				}
 				//console.log(entry);
 				this._nextLogLineIndex += 1;
 				if (this._callback) {
@@ -532,7 +535,22 @@ describe.only("Running", function () {
 		});
 	});
 
-	it(".restartOnEvent == true");
+	it(".run == true", function (done) {
+		w = new Watcher(["temp/a"], { run: true }, helper.cmd("--stay-alive"));
+
+		w.start(function () {
+			helper.expectEvent("run", done);
+		});
+	});
+
+	it(".run == false", function (done) {
+		w = new Watcher(["temp/a"], { run: false }, helper.cmd("--stay-alive"));
+
+		w.start(function () {
+			helper.expectNoEvents(500, done);
+		});
+	});
+
 	it(".restartOnEvent == false");
 
 	it(".restart");

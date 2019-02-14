@@ -42,6 +42,7 @@ var defaultOptions = {
 	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
 	restartOnEvent: false, // restart if file changed
+	run: false, // run immediately without waiting for events
 	events: ["create", "change", "delete"],
 	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
 	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
@@ -179,6 +180,10 @@ function Watcher() {
 	this._ruleOptions.cmd = cmd;
 	this._ruleOptions.callback = callback;
 
+	if (this._ruleOptions.run) {
+		this._ruleOptions.combineEvents = true;
+	}
+
 	if (this._ruleOptions.debug) {
 		this._ruleOptions.kill.debug = true;
 	}
@@ -243,15 +248,15 @@ Watcher.prototype.start = function (callback) {
 	this._processes = {};
 
 	if (this._ruleOptions.cmd) {
-		if (this._ruleOptions.type === "exec") {
-			if (this.getOption("combineEvents")) {
-				this._ruleOptions.callback = this._execCmd.bind(this);
-			} else {
-				this._ruleOptions.callback = this._execCmd.bind(this);
+		if (this.getOption("combineEvents")) {
+			this._ruleOptions.callback = this._execCmd.bind(this);
+			if (this._ruleOptions.run) {
+				this._execCmd([]);
 			}
 		} else {
-			//this._ruleOptions.callback = this._restartChild.bind(this);
+			this._ruleOptions.callback = this._execCmd.bind(this);
 		}
+
 	}
 
 	//console.log(this._ruleOptions);

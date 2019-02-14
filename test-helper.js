@@ -2,6 +2,18 @@ var fs = require("fs");
 var path = require("path");
 var program = require("commander");
 
+function sendEventSync(event, data) {
+	data = data || {};
+	data.timestamp = Date.now();
+	console.log("send", event, data);
+	fs.appendFileSync(program.log, JSON.stringify({ event, data }) + "\n", "utf8");
+
+}
+process.on("uncaughtException", function (err) {
+	console.error(err);
+	sendEventSync("crash");
+});
+
 program
 	.option("--exit <value>", "")
 	.option("--event <value>", "")
@@ -16,14 +28,6 @@ program
 	.option("--log [path]", "Log file path")
 
 program.parse(process.argv);
-
-function sendEventSync(event, data) {
-	data = data || {};
-	data.timestamp = Date.now();
-	console.log("send", event, data);
-	fs.appendFileSync(program.log, JSON.stringify({ event, data }) + "\n", "utf8");
-
-}
 
 sendEventSync("run");
 
@@ -71,8 +75,4 @@ if (program.stayAlive) {
 		process.exit(program.exit || 0);
 	}, program.delay || 0);
 }
-
-process.on("uncaughtException", function (err) {
-	console.error(err);
-});
 
