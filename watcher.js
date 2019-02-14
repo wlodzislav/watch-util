@@ -12,58 +12,24 @@ function pad2(n) {
 	return n < 10 ? "0" + n : n;
 }
 
-function timestamp() {
-	var now = new Date();
-	return pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
-}
-
 function debugLog() {
-	console.log(timestamp() + ": " + [].slice.call(arguments).join(" "));
-}
-
-function shallowCopyObj(obj) {
-	var copy = {};
-	for (var key in obj) {
-		copy[key] = obj[key];
-	}
-	return copy;
-}
-
-function assign(/* sources... */) {
-	var target = {};
-	for (var i = 0; i < arguments.length; i++) {
-		var source = arguments[i];
-		for (var key in source) {
-			target[key] = source[key];
-		}
-	}
-	return target;
+	var now = new Date();
+	var timestamp = pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
+	console.log(timestamp + ": " + [].slice.call(arguments).join(" "));
 }
 
 function debounce(fun, duration) {
 	var timeout;
-	var context;
-	var args;
-	var last;
-
-	var check = function() {
-		var elapsed = Date.now() - last;
-
-		if (elapsed < duration) {
-			timeout = setTimeout(check, duration - elapsed);
-		} else {
-			timeout = null;
-			fun.apply(context, args);
-		}
-	};
-
+	var context, args;
 	return function() {
+			console.log(Date.now(), "call");
 		context = this;
 		args = arguments;
-		last = Date.now();
-		if (!timeout) {
-			timeout = setTimeout(check, duration);
-		}
+		clearTimeout(timeout);
+		timeout = setTimeout(function () {
+			console.log(Date.now(), "deb");
+			fun.apply(context, args);
+		}, duration);
 	};
 };
 
@@ -212,7 +178,7 @@ function Watcher() {
 		}
 	}
 
-	this._ruleOptions = options ? shallowCopyObj(options) : {};
+	this._ruleOptions = options ? Object.assign({}, options) : {};
 	this._ruleOptions.globs = globs;
 	this._ruleOptions.cmdOrFun = callback || cmd;
 
@@ -236,18 +202,6 @@ function Watcher() {
 	this.on = this.ee.on.bind(this.ee);
 	this.once = this.ee.once.bind(this.ee);
 }
-
-Watcher.prototype.isRunning = function () {
-	return this._runState === "running";
-};
-
-Watcher.prototype.isStopped = function () {
-	return this._runState === "stopped";
-};
-
-Watcher.prototype.isPaused = function () {
-	return this._runState === "paused";
-};
 
 Watcher.prototype.getLog = function () {
 	return this._log;
@@ -290,6 +244,7 @@ Watcher.prototype.start = function (callback) {
 	var firstTime = true;
 	var changed = {};
 	var execCallback = function (action, filePath) {
+		console.log(Date.now(), arguments);
 		var events = this.getOption("events");
 		if (events.indexOf(action) !== -1) {
 			changed[filePath] = { action: action, filePath: filePath };
@@ -478,30 +433,6 @@ Watcher.prototype.stop = function (callback) {
 			afterTerminate();
 		}
 	}
-};
-
-Watcher.prototype.restart = function (callback) {
-	this.stop(function (err) {
-		this.start();
-		if (callback) { return callback(null); }
-	}.bind(this));
-};
-
-Watcher.prototype.pause = function (callback) {
-	this.stop(function (err) {
-		this._runState = "paused";
-		if (callback) { return callback(null); }
-	}.bind(this));
-};
-
-Watcher.prototype.toJSON = function () {
-	var ruleOptionsCopy = JSON.parse(JSON.stringify(this._ruleOptions));
-	if (typeof(this._ruleOptions.cmdOrFun) === "function") {
-		ruleOptionsCopy.cmdOrFun = "<FUNCTION>";
-	}
-	ruleOptionsCopy.runState = this._runState;
-	ruleOptionsCopy.id = this.id;
-	return ruleOptionsCopy;
 };
 
 Watcher.prototype._terminateChild = function (callback) {

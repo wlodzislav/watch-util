@@ -16,6 +16,7 @@ var w;
 
 var callbackArguments = [];
 var callback = function () {
+	//console.log(arguments);
 	if (_callback) {
 		_callback.apply(null, arguments);
 	} else {
@@ -23,12 +24,25 @@ var callback = function () {
 	}
 };
 
-function expectCallback(fileName, event, callback) {
-	_callback = function (f, e) {
-		assert.equal(fileName, f);
-		assert.equal(event, e);
-		_callback = null;
-		callback();
+function expectCallback() {
+	if (arguments.length == 3) {
+		var fileName = arguments[0];
+		var event = arguments[1];
+		var callback = arguments[2];
+		_callback = function (f, e) {
+			assert.equal(fileName, f);
+			assert.equal(event, e);
+			_callback = null;
+			callback();
+		}
+	} else {
+		var fileNames = arguments[0];
+		var callback = arguments[1];
+		_callback = function (f) {
+			assert.deepEqual(fileNames, f);
+			_callback = null;
+			callback();
+		}
 	}
 	if (callbackArguments.length) {
 		var args = callbackArguments.shift();
@@ -50,6 +64,16 @@ function expectNoCallback(delay, callback) {
 	}
 };
 
+function create(f) {
+	fs.writeFileSync(f, "", "utf8");
+}
+
+var change = create;
+
+function rm(f) {
+	rimraf.sync(f);
+}
+
 describe("Watching", function () {
 	beforeEach(function () {
 		rimraf.sync("temp");
@@ -68,7 +92,7 @@ describe("Watching", function () {
 		w = new Watcher(["temp/a"], callback);
 
 		w.start(function () {
-			touch.sync("temp/a");
+			create("temp/a");
 			expectCallback("temp/a", "create", done);
 		});
 	});
@@ -76,9 +100,9 @@ describe("Watching", function () {
 	it("handle change", function (done) {
 		w = new Watcher(["temp/a"], callback);
 
-		touch.sync("temp/a");
+		create("temp/a");
 		w.start(function () {
-			fs.writeFileSync("temp/a", "", "utf8");
+			change("temp/a");
 			expectCallback("temp/a", "change", done);
 		});
 	});
@@ -86,9 +110,9 @@ describe("Watching", function () {
 	it("handle delete", function (done) {
 		w = new Watcher(["temp/a"], callback);
 
-		touch.sync("temp/a");
+		create("temp/a");
 		w.start(function () {
-			rimraf.sync("temp/a");
+			rm("temp/a");
 			expectCallback("temp/a", "delete", done);
 		});
 	});
@@ -96,9 +120,9 @@ describe("Watching", function () {
 	it("handle delete parent dir", function (done) {
 		w = new Watcher(["temp/a"], callback);
 
-		touch.sync("temp/a");
+		create("temp/a");
 		w.start(function () {
-			rimraf.sync("temp");
+			rm("temp");
 			expectCallback("temp/a", "delete", done);
 		});
 	});
@@ -107,11 +131,11 @@ describe("Watching", function () {
 		w = new Watcher(["temp/a"], { events: ["create", "change"] }, callback);
 
 		w.start(function () {
-			touch.sync("temp/a");
+			create("temp/a");
 			expectCallback("temp/a", "create", function () {
-				fs.writeFileSync("temp/a", "", "utf8");
+				change("temp/a");
 				expectCallback("temp/a", "change", function () {
-					rimraf.sync("temp/a");
+					rm("temp/a");
 					expectNoCallback(500, done);
 				});
 			});
@@ -119,9 +143,67 @@ describe("Watching", function () {
 	});
 
 
-	it(".combineEvents + .debounce > 0");
+	it(".combineEvents same file", function (done) {
+		w = new Watcher(["temp/a"], { debounce: 1000, combineEvents: true }, callback);
 
-	it(".combineEvents + .debounce == 0");
+		create("temp/a");
+		w.start(function () {
+			change("temp/a");
+			delete("temp/a");
+			expectCallback(["temp/a"], done);
+		});
+	});
+
+	it(".combineEvents multiple files", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: true }, callback);
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			change("temp/a");
+			change("temp/b");
+			expectCallback(["temp/a"], done);
+		});
+	});
+
+	it(".combineEvents == true + .debounce", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: true }, callback);
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			change("temp/a");
+			change("temp/b");
+			setTimeout(function () {
+				change("temp/b");
+			}, 1100);
+			expectCallback(["temp/a", "temp/b"], function () {
+				expectCallback(["temp/b"], done);
+			});
+		});
+	});
+
+	it.only(".combineEvents == false + .debounce", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: false }, callback);
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			change("temp/a");
+			change("temp/b");
+			setTimeout(function () {
+				change("temp/a");
+			}, 500);
+			setTimeout(function () {
+				change("temp/b");
+			}, 1100);
+			expectCallback("temp/b", "change", function () {
+				expectCallback("temp/a", "change", function () {
+					expectCallback("temp/b", "change", done);
+				});
+			});
+		});
+	});
 
 	it(".reglob");
 });
