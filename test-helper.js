@@ -3,7 +3,6 @@ var path = require("path");
 var program = require("commander");
 
 program
-	.option("--type <value>", "")
 	.option("--exit <value>", "")
 	.option("--event <value>", "")
 	.option("--cwd <value>", "")
@@ -11,21 +10,30 @@ program
 	.option("--file <value>", "")
 	.option("--rel-dir <value>", "")
 	.option("--dir <value>", "")
+	.option("--stay-alive", "Stay alive until killed")
+	.option("--delay [n]", "Delay exit by ms")
+	.option("--exit [code]", "Exit code")
+	.option("--log [path]", "Log file path")
 
 program.parse(process.argv);
 
 function sendEventSync(event, data) {
-	//console.log("send", event, data);
-	fs.appendFileSync(path.join(__dirname, "log"), JSON.stringify({ event, data }) + "\n", "utf8");
+	data = data || {};
+	data.timestamp = Date.now();
+	console.log("send", event, data);
+	fs.appendFileSync(program.log, JSON.stringify({ event, data }) + "\n", "utf8");
 
 }
 
-sendEventSync("run", data);
+sendEventSync("run");
 
-if (program.type === "reload") {
+if (program.stayAlive) {
 	function onSig() {
-		sendEventSync("reloaded")
-		process.exit(program.exit || 0);
+		sendEventSync("killed")
+		setTimeout(function () {
+			console.log("exit");
+			process.exit(program.exit || 0);
+		}, program.delay || 0);
 	}
 
 	process.on("SIGTERM", onSig);
@@ -36,7 +44,6 @@ if (program.type === "reload") {
 	var files;
 
 	var data = {
-		timestamp: Date.now(),
 		event: program.event,
 		cwd: program.cwd,
 		relFile: program.relFile,
@@ -59,7 +66,13 @@ if (program.type === "reload") {
 			delete data[key];
 		}
 	}
-
-	process.exit(program.exit || 0);
+	setTimeout(function () {
+		console.log("exit");
+		process.exit(program.exit || 0);
+	}, program.delay || 0);
 }
+
+process.on("uncaughtException", function (err) {
+	console.error(err);
+});
 

@@ -18,6 +18,6 @@
     "chalk": "^1.1.3",
     "commander": "^2.9.0",
     "glob": "^7.1.2",
-    "kill-with-style": "^1.0.1"
+    "kill-with-style": "^1.1.0"
   }
 }
