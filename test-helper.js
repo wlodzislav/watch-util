@@ -14,22 +14,26 @@ program
 
 program.parse(process.argv);
 
+function sendSync(event, data) {
+	fs.appendFileSync(path.join(__dirname, "log"), JSON.stringify({ event, data }) + "\n", "utf8");
+
+}
+
 if (program.type === "reload") {
 	function onSig() {
-		var data = { event: "reloaded" };
-		fs.appendFileSync(path.join(__dirname, "log"), JSON.stringify(data) + "\n", "utf8");
+		sendSync("reloaded")
 		process.exit(program.exit || 0);
 	}
 
 	process.on("SIGTERM", onSig);
 	process.on("SIGINT", onSig);
+	setInterval(function () {}, 10000);
 } else {
 	var relFiles;
 	var files;
 
 	var data = {
 		timestamp: Date.now(),
-		event: "exec",
 		action: program.actionValue,
 		cwd: program.cwd,
 		relFile: program.relFile,
@@ -53,8 +57,7 @@ if (program.type === "reload") {
 		}
 	}
 
-	//console.log(data);
-	fs.appendFileSync(path.join(__dirname, "log"), JSON.stringify(data) + "\n", "utf8");
+	sendSync("exec", data);
 	process.exit(program.exit || 0);
 }
 

@@ -6,14 +6,91 @@ var EventEmitter = require('events');
 var glob = require("glob");
 var chalk = require("chalk");
 var async = require("async");
-
-var utils = require("./utils");
-var debounce = utils.debounce;
-var debugLog = utils.debugLog;
-var shallowCopyObj = utils.shallowCopyObj;
-var genUID = utils.genUID;
 var kill = require("kill-with-style");
-var defaultOptions = require("./default-options");
+
+function pad2(n) {
+	return n < 10 ? "0" + n : n;
+}
+
+function timestamp() {
+	var now = new Date();
+	return pad2(now.getHours()) + ":" + pad2(now.getMinutes()) + ":" + pad2(now.getSeconds());
+}
+
+function debugLog() {
+	console.log(timestamp() + ": " + [].slice.call(arguments).join(" "));
+}
+
+function shallowCopyObj(obj) {
+	var copy = {};
+	for (var key in obj) {
+		copy[key] = obj[key];
+	}
+	return copy;
+}
+
+function assign(/* sources... */) {
+	var target = {};
+	for (var i = 0; i < arguments.length; i++) {
+		var source = arguments[i];
+		for (var key in source) {
+			target[key] = source[key];
+		}
+	}
+	return target;
+}
+
+function debounce(fun, duration) {
+	var timeout;
+	var context;
+	var args;
+	var last;
+
+	var check = function() {
+		var elapsed = Date.now() - last;
+
+		if (elapsed < duration) {
+			timeout = setTimeout(check, duration - elapsed);
+		} else {
+			timeout = null;
+			fun.apply(context, args);
+		}
+	};
+
+	return function() {
+		context = this;
+		args = arguments;
+		last = Date.now();
+		if (!timeout) {
+			timeout = setTimeout(check, duration);
+		}
+	};
+};
+
+function genUID() {
+	return Date.now() + Math.floor(Math.random() * 1000);
+}
+
+var defaultOptions = {
+	debounce: 200, // exec/reload once in ms at max
+	reglob: 50, // perform reglob to watch added files
+	restartOnError: false, // restart if exit code != 0
+	restartOnSuccess: false, // restart if exit code == 0
+	events: ["create", "change", "delete"],
+	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
+	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
+	useShell: true, // run in shell
+	customShell: "", // custom shell to run cmds, if not set - run in default shell
+	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
+	writeToConsole: false, // write logs to console
+	mtimeCheck: true, // check modified time before firing events
+	debug: false, // debug logging
+	killSignal: "SIGTERM", // default signal for terminate()
+	killCheckInterval: 20, // interval for checking that process is dead
+	killRetryInterval: 500, // interval to retry killing process if it's still not dead
+	killRetryCount: 5, // max retries to kill process
+	killTimeout: 5000 // stop trying to kill process after that timeout
+};
 
 var isShAvailableOnWin = undefined;
 function checkShAvailableOnWin() {
@@ -98,42 +175,57 @@ function globWithNegates(patterns) {
 	});
 	return Object.keys(resultHash);
 }
+/*
+	new Watcher(globs, options, callback)
+	new Watcher(globs, options, cmd)
+	new Watcher(globs, callback)
+	new Watcher(globs, cmd)
+	new Watcher(options, callback)
+	new Watcher(options, cmd)
+	new Watcher(globs)
+	new Watcher(options)
+*/
 
-function Watcher(globs, ruleOptions, cmdOrFun) {
-	if (!(this instanceof Watcher)) {
-		if (arguments.length === 1) {
-			return new Watcher(arguments[0]);
-		} else if (arguments.length === 2) {
-			return new Watcher(arguments[0], arguments[1]);
+function Watcher() {
+	var globs, options, callback, cmd;
+	if (Array.isArray(arguments[0])) {
+		globs = arguments[0];
+	} else {
+		options = arguments[0];
+	}
+
+	if (arguments.length > 1) {
+		if (typeof(arguments[1]) == "function") {
+			callback = arguments[1];
+		} else if (typeof(arguments[1]) == "string") {
+			cmd = arguments[1];
 		} else {
-			return new Watcher(arguments[0], arguments[1], arguments[2]);
+			options = arguments[1];
 		}
 	}
 
-	var ruleOptions;
-	if (arguments.length === 1) {
-		ruleOptions = shallowCopyObj(arguments[0]);
-	} else if (arguments.length === 2) {
-		ruleOptions = {};
-		ruleOptions.globs = arguments[0];
-		ruleOptions.cmdOrFun = arguments[1];
-	} else {
-		ruleOptions = shallowCopyObj(ruleOptions);
-		ruleOptions.globs = globs;
-		ruleOptions.cmdOrFun = cmdOrFun;
+	if (arguments.length > 2) {
+		if (typeof(arguments[2]) == "function") {
+			callback = arguments[2];
+		} else {
+			cmd = arguments[2];
+		}
 	}
 
-	this._ruleOptions = ruleOptions;
+	this._ruleOptions = options ? shallowCopyObj(options) : {};
+	this._ruleOptions.globs = globs;
+	this._ruleOptions.cmdOrFun = callback || cmd;
+
 	this.id = this._ruleOptions.id || genUID();
 
 	if (!this._ruleOptions.type) {
 		this._ruleOptions.type = "reload";
 	}
-	if (typeof cmdOrFun === "function") {
+	if (typeof (this._ruleOptions.cmdOrFun) === "function") {
 		this._ruleOptions.type = "exec";
 	}
 
-	this._runState = ruleOptions.runState || "stopped"
+	this._runState = this._ruleOptions.runState || "stopped"
 	if (this._runState === "running") {
 		this._runState = "paused"
 	}
@@ -171,22 +263,6 @@ Watcher.prototype._writeLog = function (entry) {
 	this.ee.emit("log", entry);
 };
 
-Watcher.prototype.update = function (ruleOptions, callback) {
-	this._ruleOptions = ruleOptions;
-	this.restart(callback);
-};
-
-Watcher.prototype.patch = function (ruleOptions, callback) {
-	for (var key in ruleOptions) {
-		this._ruleOptions[key] = ruleOptions[key];
-	}
-	this.restart(callback);
-};
-
-Watcher.prototype.options = function () {
-	return this._ruleOptions;
-};
-
 Watcher.prototype.getOption = function (name) {
 	if (this._pm) {
 		return [this._ruleOptions[name], this._pm._globalOptions[name], defaultOptions[name]].find(function (v) {
@@ -214,8 +290,8 @@ Watcher.prototype.start = function (callback) {
 	var firstTime = true;
 	var changed = {};
 	var execCallback = function (action, filePath) {
-		var actions = this.getOption("actions");
-		if (actions.indexOf(action) !== -1) {
+		var events = this.getOption("events");
+		if (events.indexOf(action) !== -1) {
 			changed[filePath] = { action: action, filePath: filePath };
 			execCallbackDebounce();
 		}
@@ -227,7 +303,7 @@ Watcher.prototype.start = function (callback) {
 		}
 		if (this._ruleOptions.type === "exec") {
 			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
-				if (this.getOption("runSeparate")) {
+				if (!this.getOption("combineEvents")) {
 					Object.keys(changed).forEach(function (fileName) {
 						var action = changed[fileName].action;
 						this._ruleOptions.cmdOrFun(fileName, action);
@@ -238,7 +314,7 @@ Watcher.prototype.start = function (callback) {
 					changed = {};
 				}
 			} else {
-				if (this.getOption("runSeparate")) {
+				if (!this.getOption("combineEvents")) {
 					var runForEach = function () {
 						var fileNames = Object.keys(changed);
 						async.eachLimit(fileNames, this.getOption("parallelLimit"), function (fileName, callback) {
@@ -286,7 +362,7 @@ Watcher.prototype.start = function (callback) {
 	}.bind(this), this.getOption("debounce"));
 	var reglob = function () {
 		if (this._runState !== "running") {
-			return;
+			//return;
 		}
 		var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globs));
 
@@ -372,7 +448,9 @@ Watcher.prototype.start = function (callback) {
 	this._runState = "running";
 	this._reglobInterval = setInterval(reglob, this.getOption("reglob"));
 	if (callback) {
-		return callback(null);
+		setTimeout(function () {
+			callback();
+		}, 0);
 	} else {
 		return this;
 	}
@@ -518,7 +596,6 @@ Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
 	} else {
 		cmd = this._ruleOptions.cmdOrFun;
 	}
-	console.log(cmd);
 	var childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
 		useShell: this.getOption("useShell"),
