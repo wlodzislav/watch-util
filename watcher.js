@@ -201,7 +201,7 @@ function Watcher() {
 	this.on = this.ee.on.bind(this.ee);
 	this.once = this.ee.once.bind(this.ee);
 
-	this._ruleOptions.writeToConsole = true; this._ruleOptions.debug = true; this._ruleOptions.kill.debug = true;
+	//this._ruleOptions.writeToConsole = true; this._ruleOptions.debug = true; this._ruleOptions.kill.debug = true;
 }
 
 Watcher.prototype.getLog = function () {
@@ -428,6 +428,8 @@ Watcher.prototype.stop = function (callback) {
 	}.bind(this));
 	this._watchers = {};
 
+	this._queues = {};
+
 	var children = [];
 	Object.values(this._processes).forEach(function (l) {
 		[].push.apply(children, l);
@@ -439,11 +441,8 @@ Watcher.prototype.stop = function (callback) {
 		if (callback) {
 			callback();
 		}
+		this._processes = {};
 	}.bind(this));
-	
-	var afterTerminate = function () {
-		if (callback) { return callback(null); }
-	}.bind(this);
 };
 
 Watcher.prototype._terminateChild = function (callback) {
@@ -502,11 +501,38 @@ Watcher.prototype._execCmd = function () {
 			this._queues[id] = [];
 		}
 		if (this._processes[id].length) {
-			var args = [].slice.call(arguments);
-			if (this.getOption("debug")) {
-				debug(chalk.green("Queued ") + JSON.stringify(args));
+			if (combined) {
+				if (this.getOption("debug")) {
+					debug(chalk.green("Queued ") + JSON.stringify({ filePaths }));
+				}
+				if (this._queues[id].length) {
+					var last = this._queues[id][this._queues[id].length - 1];
+					filePaths.forEach(function (p) {
+						if (last.filePaths.indexOf(p) == -1) {
+							last.filePaths.push(p);
+						}
+					});
+				} else {
+					this._queues[id].push({ filePaths });
+				}
+			} else {
+				if (this.getOption("debug")) {
+					debug(chalk.green("Queued ") + JSON.stringify({ filePath, action }));
+				}
+				if (this._queues[id].length) {
+					var args = this._queues[id].find(function (args) {
+						return args.filePath == filePath;
+					});
+
+					if (args) {
+						args.action = action; // overwrite action to match the last event
+					} else {
+						this._queues[id].push({ filePath, action });
+					}
+				} else {
+					this._queues[id].push({ filePath, action });
+				}
 			}
-			this._queues[id].push(args);
 			return;
 		}
 	}
@@ -574,7 +600,11 @@ Watcher.prototype._execCmd = function () {
 		if (this.getOption("waitDone")) {
 			if (this._queues[id].length) {
 				var args = this._queues[id].shift();
-				this._execCmd.apply(this, args);
+				if (combined) {
+					this._execCmd(args.filePaths);
+				} else {
+					this._execCmd(args.filePath, args.action);
+				}
 			}
 			return;
 		}

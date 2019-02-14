@@ -345,7 +345,7 @@ describe("Watching", function () {
 	it(".reglob");
 });
 
-describe.only("Running", function () {
+describe("Running", function () {
 	var helper;
 
 	beforeEach(function () {
@@ -420,7 +420,9 @@ describe.only("Running", function () {
 					change("temp/a");
 					setTimeout(function () {
 						w.stop();
-						helper.expectNoEvents(1000, done);
+						helper.expectEvent("exit", function () {
+							helper.expectNoEvents(1000, done);
+						});
 					}, 500);
 				});
 			}, watcherStartDelay);
@@ -438,7 +440,9 @@ describe.only("Running", function () {
 					change("temp/a");
 					setTimeout(function () {
 						w.stop();
-						helper.expectNoEvents(1000, done);
+						helper.expectEvent("exit", function () {
+							helper.expectNoEvents(1000, done);
+						});
 					}, 500);
 				});
 			}, watcherStartDelay);
@@ -455,7 +459,9 @@ describe.only("Running", function () {
 			setTimeout(function () {
 				change("temp/a");
 				helper.expectEvent("run", function () {
-					helper.expectEvent("run", done);
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", done);
+					});
 				});
 			}, watcherStartDelay);
 		});
@@ -469,7 +475,9 @@ describe.only("Running", function () {
 			setTimeout(function () {
 				change("temp/a");
 				helper.expectEvent("run", function () {
-					helper.expectEvent("run", done);
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", done);
+					});
 				});
 			}, watcherStartDelay);
 		});
@@ -483,9 +491,11 @@ describe.only("Running", function () {
 			setTimeout(function () {
 				change("temp/a");
 				helper.expectEvent("run", function () {
-					helper.expectEvent("run", function () {
-						w.stop();
-						helper.expectNoEvents(1000, done);
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", function () {
+							w.stop();
+							helper.expectNoEvents(1000, done);
+						});
 					});
 				});
 			}, watcherStartDelay);
@@ -501,7 +511,9 @@ describe.only("Running", function () {
 			setTimeout(function () {
 				change("temp/a");
 				helper.expectEvent("run", function () {
-					helper.expectNoEvents(500, done);
+					helper.expectEvent("exit", function () {
+						helper.expectNoEvents(500, done);
+					});
 				});
 			}, watcherStartDelay);
 		});
@@ -515,7 +527,9 @@ describe.only("Running", function () {
 			setTimeout(function () {
 				change("temp/a");
 				helper.expectEvent("run", function () {
-					helper.expectEvent("run", done);
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", done);
+					});
 				});
 			}, watcherStartDelay);
 		});
@@ -529,7 +543,9 @@ describe.only("Running", function () {
 			setTimeout(function () {
 				change("temp/a");
 				helper.expectEvent("run", function () {
-					helper.expectNoEvents(500, done);
+					helper.expectEvent("exit", function () {
+						helper.expectNoEvents(500, done);
+					});
 				});
 			}, watcherStartDelay);
 		});
@@ -603,7 +619,7 @@ describe.only("Running", function () {
 		});
 	});
 
-	it.only("rerun .waitDone == true + .combineEvents == false", function (done) {
+	it("rerun .waitDone == true + .combineEvents == false", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { waitDone: true, combineEvents: false }, helper.cmd("--delay 500"));
 
 		create("temp/a");
@@ -629,9 +645,53 @@ describe.only("Running", function () {
 		});
 	});
 
-	it(".waitDone == true + .combineEvents == true combine events in long queue");
+	it(".waitDone == true + .combineEvents == true combine events in long queue", function (done) {
+		w = new Watcher(["temp/a"], { debounce: 0, waitDone: true, combineEvents: true }, helper.cmd("--delay 500"));
 
-	it(".waitDone == true + .combineEvents == false combine events in long queue");
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					setTimeout(function () {
+						change("temp/a");
+						helper.expectEvent("exit", function () {
+							helper.expectEvent("run", function () {
+								helper.expectEvent("exit", function () {
+									helper.expectNoEvents(1000, done);
+								});
+							});
+						});
+					}, 50);
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".waitDone == true + .combineEvents == false combine events in long queue", function (done) {
+		w = new Watcher(["temp/a"], { debounce: 0, waitDone: true, combineEvents: false }, helper.cmd("--delay 500"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					setTimeout(function () {
+						change("temp/a");
+						helper.expectEvent("exit", function () {
+							helper.expectEvent("run", function () {
+								helper.expectEvent("exit", function () {
+									helper.expectNoEvents(1000, done);
+								});
+							});
+						});
+					}, 50);
+				});
+			}, watcherStartDelay);
+		});
+	});
 
 	it(".waitDone == false + .combineEvents == true", function (done) {
 		w = new Watcher(["temp/a"], { waitDone: false, combineEvents: true }, helper.cmd("--stay-alive"));
