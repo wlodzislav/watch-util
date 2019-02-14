@@ -30,8 +30,8 @@ function expectCallback() {
 		var event = arguments[1];
 		var callback = arguments[2];
 		_callback = function (f, e) {
-			assert.equal(fileName, f);
-			assert.equal(event, e);
+			assert.equal(f, fileName);
+			assert.equal(e, event);
 			_callback = null;
 			callback();
 		}
@@ -39,7 +39,7 @@ function expectCallback() {
 		var fileNames = arguments[0];
 		var callback = arguments[1];
 		_callback = function (f) {
-			assert.deepEqual(fileNames, f);
+			assert.deepEqual(f, fileNames);
 			_callback = null;
 			callback();
 		}
@@ -162,7 +162,7 @@ describe("Watching", function () {
 		w.start(function () {
 			change("temp/a");
 			change("temp/b");
-			expectCallback(["temp/a"], done);
+			expectCallback(["temp/a", "temp/b"], done);
 		});
 	});
 
@@ -183,7 +183,7 @@ describe("Watching", function () {
 		});
 	});
 
-	it.only(".combineEvents == false + .debounce", function (done) {
+	it(".combineEvents == false + .debounce", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: false }, callback);
 
 		create("temp/a");

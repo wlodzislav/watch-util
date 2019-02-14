@@ -22,12 +22,10 @@ function debounce(fun, duration) {
 	var timeout;
 	var context, args;
 	return function() {
-			console.log(Date.now(), "call");
 		context = this;
 		args = arguments;
 		clearTimeout(timeout);
 		timeout = setTimeout(function () {
-			console.log(Date.now(), "deb");
 			fun.apply(context, args);
 		}, duration);
 	};
@@ -180,14 +178,15 @@ function Watcher() {
 
 	this._ruleOptions = options ? Object.assign({}, options) : {};
 	this._ruleOptions.globs = globs;
-	this._ruleOptions.cmdOrFun = callback || cmd;
+	this._ruleOptions.cmd = cmd;
+	this._ruleOptions.callback = callback;
 
 	this.id = this._ruleOptions.id || genUID();
 
 	if (!this._ruleOptions.type) {
 		this._ruleOptions.type = "reload";
 	}
-	if (typeof (this._ruleOptions.cmdOrFun) === "function") {
+	if (this._ruleOptions.callback) {
 		this._ruleOptions.type = "exec";
 	}
 
@@ -199,6 +198,7 @@ function Watcher() {
 	this._log = [];
 
 	this.ee = new EventEmitter();
+	this._rawEE = new EventEmitter();
 	this.on = this.ee.on.bind(this.ee);
 	this.once = this.ee.once.bind(this.ee);
 }
@@ -241,167 +241,21 @@ Watcher.prototype.start = function (callback) {
 	this._watchers = {};
 
 	this._childRunning = null;
-	var firstTime = true;
-	var changed = {};
-	var execCallback = function (action, filePath) {
-		console.log(Date.now(), arguments);
-		var events = this.getOption("events");
-		if (events.indexOf(action) !== -1) {
-			changed[filePath] = { action: action, filePath: filePath };
-			execCallbackDebounce();
-		}
-	}.bind(this);
+	this._firstTime = true;
+	this._changed = {};
 
-	var execCallbackDebounce = debounce(function () {
-		if (this._runState !== "running") {
-			return;
-		}
-		if (this._ruleOptions.type === "exec") {
-			if (typeof(this._ruleOptions.cmdOrFun) === "function") {
-				if (!this.getOption("combineEvents")) {
-					Object.keys(changed).forEach(function (fileName) {
-						var action = changed[fileName].action;
-						this._ruleOptions.cmdOrFun(fileName, action);
-					}.bind(this));
-					changed = {};
-				} else {
-					this._ruleOptions.cmdOrFun(Object.keys(changed));
-					changed = {};
-				}
-			} else {
-				if (!this.getOption("combineEvents")) {
-					var runForEach = function () {
-						var fileNames = Object.keys(changed);
-						async.eachLimit(fileNames, this.getOption("parallelLimit"), function (fileName, callback) {
-							if (this._runState !== "running") {
-								return callback();
-							}
-							var action = changed[fileName].action;
-							delete changed[fileName];
-							this._execChildSeparate(fileName, action, callback);
-						}.bind(this), function () {
-							if (this._runState !== "running") {
-								return;
-							}
-							if (Object.keys(changed).length) {
-								setTimeout(function () { // to prevent call stack error
-									runForEach();
-								}, 0);
-							}
-						});
-					}.bind(this);
+	if (this._ruleOptions.type === "exec") {
+		this._execCallbackDebounced = debounce(this._execCallback.bind(this), this.getOption("debounce"));
+	} else {
+		this._restartChildDebounced = debounce(this._restartChild.bind(this), this.getOption("debounce"));
+	}
 
-					if (!this._childrenRunning || !this._childrenRunning.length) {
-						runForEach();
-					}
-				} else {
-					var onExit = function () {
-						if (Object.keys(changed).length) {
-							if (this._runState !== "running") {
-								return;
-							}
-							this._execChildBatch(Object.keys(changed), onExit);
-							changed = {};
-						}
-					}.bind(this);
-
-					if (!this._childRunning) {
-						this._execChildBatch(Object.keys(changed), onExit);
-						changed = {};
-					}
-				}
-			}
-		} else if (this._ruleOptions.type === "reload") {
-			this._restartChild();
-		}
-	}.bind(this), this.getOption("debounce"));
-	var reglob = function () {
-		if (this._runState !== "running") {
-			//return;
-		}
-		var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globs));
-
-		paths.forEach(function (p) {
-			if (!this._watchers[p]) {
-				var rewatch = function () {
-					if (this._watchers[p]) {
-						if (this.getOption("debug")) {
-							debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
-						}
-						this._watchers[p].close();
-					} else {
-					}
-					try {
-						var stat = fs.statSync(p);
-						var mtime = stat.mtime;
-					} catch (err) {
-						return setTimeout(reglob, 0);
-					}
-					this._watchers[p] = fs.watch(p, function (action) {
-						if (this.getOption("debug")) {
-							debugLog(chalk.green("Fire")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id+" action="+action);
-						}
-						try {
-							stat = fs.statSync(p);
-						} catch (err) {
-							if (err.code == "ENOENT") {
-								this._watchers[p].close();
-								delete this._watchers[p];
-								execCallback("delete", p);
-								return;
-							}
-						}
-						if (action == "rename") {
-							setTimeout(rewatch, 0);
-						}
-
-						if (this.getOption("mtimeCheck")) {
-							if (stat.mtime > mtime) {
-								execCallback("change", p);
-								mtime = stat.mtime;
-							}
-						} else {
-							execCallback("change", p);
-						}
-					}.bind(this));
-					if (this.getOption("debug")) {
-						this._watchers[p].id = genUID();
-						debugLog(chalk.green("Created")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
-					}
-				}.bind(this);
-
-				rewatch();
-
-				if (!firstTime) {
-					execCallback("create", p);
-				}
-			}
-		}.bind(this));
-
-		Object.keys(this._watchers).forEach(function (p) {
-			if (paths.indexOf(p) == -1) {
-				if (this.getOption("debug")) {
-					debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
-				}
-				// catch deletions that happened right after reglob
-				if (this._watchers[p]) {
-					this._watchers[p].close();
-					delete this._watchers[p];
-					execCallback("delete", p);
-				}
-			}
-		}.bind(this));
-
-		if (firstTime && this._ruleOptions.type === "reload") {
-			this._restartChild();
-		}
-		firstTime = false;
-	}.bind(this);
-
-	reglob();
+	this._reglob();
+	this._debouncers = {};
 
 	this._runState = "running";
-	this._reglobInterval = setInterval(reglob, this.getOption("reglob"));
+	this._reglobInterval = setInterval(this._reglob.bind(this), this.getOption("reglob"));
+
 	if (callback) {
 		setTimeout(function () {
 			callback();
@@ -409,6 +263,132 @@ Watcher.prototype.start = function (callback) {
 	} else {
 		return this;
 	}
+};
+
+
+Watcher.prototype._execCallback = function (filePath, action) {
+	this._ruleOptions.callback(Object.keys(this._changed));
+	this._changed = {};
+}
+
+Watcher.prototype._execCallbackFor = function (filePath) {
+	var action = this._changed[filePath].action;
+	this._changed[filePath] = null;
+	this._ruleOptions.callback(filePath, action);
+}
+
+Watcher.prototype._onWatcherEvent = function (filePath, action) {
+	var events = this.getOption("events");
+	if (events.indexOf(action) == -1) {
+		return;
+	}
+	this._changed[filePath] = { action: action, filePath: filePath };
+
+	if (this._ruleOptions.type === "exec") {
+		if (this.getOption("combineEvents")) {
+			this._execCallbackDebounced();
+		} else {
+			if (!this._debouncers[filePath]) {
+				this._debouncers[filePath] = debounce(this._execCallbackFor.bind(this, filePath), this.getOption("debounce"));
+			}
+			this._debouncers[filePath]();
+		}
+	} else {
+		this._changed[filePath] = { action: action, filePath: filePath };
+		this._restartChildDebounced();
+	}
+};
+
+Watcher.prototype._runCombine = function () {
+	this._ruleOptions.callback(Object.keys(this._changed));
+	this._changed = {};
+};
+
+Watcher.prototype._runEach = function (fileName) {
+	this._ruleOptions.callback(fileName, action);
+};
+
+Watcher.prototype._reglob = function () {
+	if (this._runState !== "running") {
+		//return;
+	}
+	var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globs));
+
+	paths.forEach(function (p) {
+		if (!this._watchers[p]) {
+			var rewatch = function () {
+				if (this._watchers[p]) {
+					if (this.getOption("debug")) {
+						debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
+					}
+					this._watchers[p].close();
+				} else {
+				}
+				try {
+					var stat = fs.statSync(p);
+					var mtime = stat.mtime;
+				} catch (err) {
+					return setTimeout(reglob, 0);
+				}
+				this._watchers[p] = fs.watch(p, function (action) {
+					if (this.getOption("debug")) {
+						debugLog(chalk.green("Fire")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id+" action="+action);
+					}
+					try {
+						stat = fs.statSync(p);
+					} catch (err) {
+						if (err.code == "ENOENT") {
+							this._watchers[p].close();
+							delete this._watchers[p];
+							this._onWatcherEvent(p, "delete");
+							return;
+						}
+					}
+					if (action == "rename") {
+						setTimeout(rewatch, 0);
+					}
+
+					if (this.getOption("mtimeCheck")) {
+						if (stat.mtime > mtime) {
+							this._onWatcherEvent(p, "change");
+							mtime = stat.mtime;
+						}
+					} else {
+						this._onWatcherEvent(p, "change");
+					}
+				}.bind(this));
+				if (this.getOption("debug")) {
+					this._watchers[p].id = genUID();
+					debugLog(chalk.green("Created")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
+				}
+			}.bind(this);
+
+			rewatch();
+
+			if (!this._firstTime) {
+				this._onWatcherEvent(p, "create");
+			}
+		}
+	}.bind(this));
+
+	Object.keys(this._watchers).forEach(function (p) {
+		if (paths.indexOf(p) == -1) {
+			if (this.getOption("debug")) {
+				debugLog(chalk.red("Deleted")+" watcher: path="+chalk.yellow(p)+" id="+this._watchers[p].id);
+			}
+			// catch deletions that happened right after reglob
+			if (this._watchers[p]) {
+				this._watchers[p].close();
+				delete this._watchers[p];
+				this._onWatcherEvent(p, "delete");
+			}
+		}
+	}.bind(this));
+
+	if (this._firstTime && this._ruleOptions.type === "reload") {
+		this._restartChild();
+	}
+	this._firstTime = false;
 };
 
 Watcher.prototype.stop = function (callback) {
@@ -438,7 +418,7 @@ Watcher.prototype.stop = function (callback) {
 Watcher.prototype._terminateChild = function (callback) {
 	if(!this._isTerminating) {
 		if (this.getOption("debug")) {
-			debugLog(chalk.green("Terminate"), this._ruleOptions.cmdOrFun.toString().slice(0, 50));
+			debugLog(chalk.green("Terminate"), this._ruleOptions.cmd.toString().slice(0, 50));
 		}
 		this._isTerminating = true;
 		kill(this._childRunning.pid, {
@@ -464,18 +444,28 @@ Watcher.prototype._terminateChild = function (callback) {
 	}
 };
 
-Watcher.prototype._execChildBatch = function (filePaths, callback) {
+Watcher.prototype._execChildBatch = function (filePaths) {
+	var onExit = function () {
+		if (Object.keys(this._changed).length) {
+			if (this._runState !== "running") {
+				return;
+			}
+			this._execChildBatch(Object.keys(this._changed), onExit);
+			this._changed = {};
+		}
+	}.bind(this);
+
 	var cmd;
-	if (this._ruleOptions.cmdOrFun.indexOf("%") !== -1) {
+	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
 		var cwd = path.resolve(".")
 		var relFiles = filePaths;
 		var files = filePaths.map(function (f) { return path.resolve(f); });
-		cmd = this._ruleOptions.cmdOrFun
+		cmd = this._ruleOptions.cmd
 			.replace("%cwd", cwd)
 			.replace("%relFiles", relFiles)
 			.replace("%files", files);
 	} else {
-		cmd = this._ruleOptions.cmdOrFun;
+		cmd = this._ruleOptions.cmd;
 	}
 
 	this._childRunning = exec(cmd, {
@@ -503,21 +493,43 @@ Watcher.prototype._execChildBatch = function (filePaths, callback) {
 
 	this._childRunning.on("exit", function () {
 		setTimeout(function () { // to prevent call stack error
-			callback();
+			onExit();
 			this._childRunning = null;
 		}.bind(this), 0);
 	}.bind(this));
 };
 
-Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
+Watcher.prototype._execChildSeparateQueue = function (changed) {
+	var fileNames = Object.keys(changed);
+	async.eachLimit(fileNames, this.getOption("parallelLimit"), function (fileName, callback) {
+		if (this._runState !== "running") {
+			return callback();
+		}
+		var action = changed[fileName].action;
+		delete changed[fileName];
+		this._execChildSeparateEach(fileName, action, callback);
+	}.bind(this), function () {
+		if (this._runState !== "running") {
+			return;
+		}
+		if (Object.keys(this._changed).length) {
+			setTimeout(function () { // to prevent call stack error
+				this._execChildSeparate(this._changed);
+				this._changed = {};
+			}.bind(this), 0);
+		}
+	});
+}
+
+Watcher.prototype._execChildSeparateEach = function (filePath, action, callback) {
 	var cmd;
-	if (this._ruleOptions.cmdOrFun.indexOf("%") !== -1) {
+	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
 		var cwd = path.resolve(".")
 		var relFile = filePath;
 		var file = path.resolve(filePath);
 		var relDir = path.dirname(filePath);
 		var dir = path.resolve(path.dirname(filePath));
-		cmd = this._ruleOptions.cmdOrFun
+		cmd = this._ruleOptions.cmd
 			.replace("%cwd", cwd)
 			.replace("%action", action)
 			.replace("%relFile", relFile)
@@ -525,7 +537,7 @@ Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
 			.replace("%relDir", relDir)
 			.replace("%dir", dir);
 	} else {
-		cmd = this._ruleOptions.cmdOrFun;
+		cmd = this._ruleOptions.cmd;
 	}
 	var childRunning = exec(cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
@@ -564,10 +576,10 @@ Watcher.prototype._execChildSeparate = function (filePath, action, callback) {
 
 Watcher.prototype._runRestartingChild = function () {
 	if (this.getOption("debug")) {
-		debugLog(chalk.green("Run"), this._ruleOptions.cmdOrFun.toString());
+		debugLog(chalk.green("Run"), this._ruleOptions.cmd.toString());
 	}
 
-	this._childRunning = exec(this._ruleOptions.cmdOrFun, {
+	this._childRunning = exec(this._ruleOptions.cmd, {
 		writeToConsole: this.getOption("writeToConsole"),
 		useShell: this.getOption("useShell"),
 		customShell: this.getOption("customShell"),
