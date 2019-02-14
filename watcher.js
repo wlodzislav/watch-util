@@ -528,16 +528,30 @@ Watcher.prototype._execCmd = function () {
 	}.bind(this));
 
 	child.on("exit", function (code) {
-		if (this._runState !== "running") {
-			return;
-		}
-		if (this.getOption("restartOnError") && code != 0) {
-			this._execCmd(filePath, action);
-		}
 		if (combined) {
 			delete this._processes["*"];
 		} else {
 			delete this._processes[filePath];
+		}
+
+		if (this._runState !== "running") {
+			return;
+		}
+
+		var restart = false;
+		if (this.getOption("restartOnError") && code != 0) {
+			restart = true;
+		}
+		if (this.getOption("restartOnSuccess") && code == 0) {
+			restart = true;
+		}
+
+		if (restart) {
+			if (combined) {
+				this._execCmd(filePaths);
+			} else {
+				this._execCmd(filePath, action);
+			}
 		}
 	}.bind(this));
 	

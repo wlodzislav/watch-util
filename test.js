@@ -342,7 +342,7 @@ describe("Watching", function () {
 	it(".reglob");
 });
 
-describe("Running", function () {
+describe.only("Running", function () {
 	var helper;
 
 	beforeEach(function () {
@@ -458,6 +458,20 @@ describe("Running", function () {
 		});
 	});
 
+	it(".restartOnError == true + .combineEvents == true", function (done) {
+		w = new Watcher(["temp/a"], { restartOnError: true, combineEvents: true }, helper.cmd("--exit 1 --delay 200"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					helper.expectEvent("run", done);
+				});
+			}, watcherStartDelay);
+		});
+	});
+
 	it("kill in .stop + .restartOnError == true", function (done) {
 		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 200"));
 
@@ -490,8 +504,33 @@ describe("Running", function () {
 		});
 	});
 
-	it(".restartOnSuccess == true");
-	it(".restartOnSuccess == false");
+	it(".restartOnSuccess == true", function (done) {
+		w = new Watcher(["temp/a"], { restartOnSuccess: true }, helper.cmd("--exit 0 --delay 200"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					helper.expectEvent("run", done);
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".restartOnSuccess == false", function (done) {
+		w = new Watcher(["temp/a"], { restartOnSuccess: false }, helper.cmd("--exit 0"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					helper.expectNoEvents(500, done);
+				});
+			}, watcherStartDelay);
+		});
+	});
 
 	it(".restartOnEvent == true");
 	it(".restartOnEvent == false");
