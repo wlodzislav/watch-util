@@ -14,118 +14,116 @@ function opts(options) {
 
 var w;
 
+var callbackArguments = [];
+var callback = function () {
+	if (_callback) {
+		_callback.apply(null, arguments);
+	} else {
+		callbackArguments.push(arguments);
+	}
+};
+
+function expectCallback(fileName, event, callback) {
+	_callback = function (f, e) {
+		assert.equal(fileName, f);
+		assert.equal(event, e);
+		_callback = null;
+		callback();
+	}
+	if (callbackArguments.length) {
+		var args = callbackArguments.shift();
+		_callback.apply(null, args);
+	}
+}
+
+function expectNoCallback(delay, callback) {
+	var timeout = setTimeout(callback, delay);
+
+	_callback = function (f, e) {
+		clearTimeout(timeout);
+		_callback = null;
+		callback(new Error("Callback is called with arguments " + [].join.call(arguments, ", ")));
+	};
+	if (callbackArguments.length) {
+		var args = callbackArguments.shift();
+		_callback.apply(null, args);
+	}
+};
 
 describe("Watching", function () {
 	beforeEach(function () {
 		rimraf.sync("temp");
 		fs.mkdirSync("temp");
-
-		//cmdHelper = new CMDHelper();
-		//cmdHelper.start();
 	});
 
 	afterEach(function (done) {
 		rimraf.sync("temp");
-
-		//cmdHelper.clean();
 		w.stop(done);
 	});
+
 	it("negate globs");
 	it("globs apply sequentially");
 
-	it(".events", function (done) {
-		var callback;
-		function _callback () {
-			if (callback) { callback.apply(this, arguments); }
-		}
-
-		w = new Watcher(["temp/a"], { events: ["create", "change"] }, _callback);
-
-		w.start(function () {
-			callback = function (fileName, event) {
-				assert.equal("create", event);
-				assert.equal("temp/a", fileName);
-				callback = function (fileName, event) {
-					assert.equal("change", event);
-					assert.equal("temp/a", fileName);
-					callback = function (fileName, event) {
-						done(new Error("Delete event"));
-					};
-					rimraf.sync("temp/a");
-					setTimeout(done, 500);
-				};
-				fs.writeFileSync("temp/a", "", "utf8");
-			};
-			touch.sync("temp/a");
-		});
-	});
-
 	it("handle create", function (done) {
-		var callback;
-		function _callback () {
-			if (callback) { callback.apply(this, arguments); }
-		}
-
-		w = new Watcher(["temp/a"], _callback);
+		w = new Watcher(["temp/a"], callback);
 
 		w.start(function () {
-			callback = function (fileName, event) {
-				assert.equal("create", event);
-				assert.equal("temp/a", fileName);
-				done();
-			};
 			touch.sync("temp/a");
+			expectCallback("temp/a", "create", done);
 		});
 	});
 
 	it("handle change", function (done) {
-		var callback;
-		function _callback () {
-			if (callback) { callback.apply(this, arguments); }
-		}
-
-		w = new Watcher(["temp/a"], _callback);
+		w = new Watcher(["temp/a"], callback);
 
 		touch.sync("temp/a");
 		w.start(function () {
-			callback = function (fileName, event) {
-				assert.equal("change", event);
-				assert.equal("temp/a", fileName);
-				done();
-			};
 			fs.writeFileSync("temp/a", "", "utf8");
+			expectCallback("temp/a", "change", done);
 		});
 	});
 
 	it("handle delete", function (done) {
-		var callback;
-		function _callback () {
-			if (callback) { callback.apply(this, arguments); }
-		}
-
-		w = new Watcher(["temp/a"], _callback);
+		w = new Watcher(["temp/a"], callback);
 
 		touch.sync("temp/a");
 		w.start(function () {
-			callback = function (fileName, event) {
-				assert.equal("delete", event);
-				assert.equal("temp/a", fileName);
-				done();
-			};
 			rimraf.sync("temp/a");
+			expectCallback("temp/a", "delete", done);
 		});
 	});
 
+	it("handle delete parent dir", function (done) {
+		w = new Watcher(["temp/a"], callback);
+
+		touch.sync("temp/a");
+		w.start(function () {
+			rimraf.sync("temp");
+			expectCallback("temp/a", "delete", done);
+		});
+	});
+
+	it(".events", function (done) {
+		w = new Watcher(["temp/a"], { events: ["create", "change"] }, callback);
+
+		w.start(function () {
+			touch.sync("temp/a");
+			expectCallback("temp/a", "create", function () {
+				fs.writeFileSync("temp/a", "", "utf8");
+				expectCallback("temp/a", "change", function () {
+					rimraf.sync("temp/a");
+					expectNoCallback(500, done);
+				});
+			});
+		});
+	});
+
+
 	it(".combineEvents + .debounce > 0");
+
 	it(".combineEvents + .debounce == 0");
 
 	it(".reglob");
-
-	it("glob + callback arguments");
-	it("glob + options + callback arguments");
-	it("glob + options arguments");
-	it("options arguments");
-	it("options + callback arguments");
 });
 
 describe("Running", function () {
@@ -158,6 +156,8 @@ describe("Running", function () {
 
 	it(".checkMD5 == true");
 	it(".checkMD5 == false");
+
+	it(".stdin");
 });
 
 describe("API", function () {
@@ -167,5 +167,14 @@ describe("API", function () {
 	it(".on(\"change\")");
 	it(".on(\"delete\")");
 	it(".on(\"all\")");
+	it(".on(\"exec\")");
+	it(".on(\"reload\")");
+	it(".on(\"killed\")");
+	it(".on(\"crashed\")");
+	it(".on(\"exited\")");
+
+	it(".stdout");
+	it(".stderr");
+	it(".stdin");
 });
 
