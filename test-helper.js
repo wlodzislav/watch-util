@@ -35,7 +35,6 @@ if (program.stayAlive) {
 	function onSig() {
 		sendEventSync("killed")
 		setTimeout(function () {
-			console.log("exit");
 			process.exit(program.exit || 0);
 		}, program.delay || 0);
 	}
@@ -72,6 +71,7 @@ if (program.stayAlive) {
 	}
 	setTimeout(function () {
 		console.log("exit");
+		sendEventSync("exit")
 		process.exit(program.exit || 0);
 	}, program.delay || 0);
 }

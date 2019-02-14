@@ -123,7 +123,7 @@ CMDHelper.prototype.expectNoEvents = function (delay, callback) {
 		clearTimeout(timeout);
 		this._callback = null;
 		callback();
-	}, delay);
+	}.bind(this), delay);
 
 	this._callback = function (e) {
 		clearTimeout(timeout);
@@ -551,7 +551,128 @@ describe.only("Running", function () {
 		});
 	});
 
+	it("don't kill .waitDone == true + .combineEvents == true", function (done) {
+		w = new Watcher(["temp/a"], { waitDone: true, combineEvents: true }, helper.cmd("--stay-alive"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					helper.expectNoEvents(500, done);
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it("rerun .waitDone == true + .combineEvents == true", function (done) {
+		w = new Watcher(["temp/a"], { waitDone: true, combineEvents: true }, helper.cmd("--delay 500"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", done);
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it("don't kill .waitDone == true + .combineEvents == false", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { waitDone: true, combineEvents: false }, helper.cmd("--stay-alive"));
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				change("temp/b");
+				helper.expectEvent("run", function () {
+					helper.expectEvent("run", function () {
+						change("temp/a");
+						change("temp/b");
+						helper.expectNoEvents(500, done);
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it.only("rerun .waitDone == true + .combineEvents == false", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { waitDone: true, combineEvents: false }, helper.cmd("--delay 500"));
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				change("temp/b");
+				helper.expectEvent("run", function () {
+					helper.expectEvent("run", function () {
+						change("temp/a");
+						change("temp/b");
+						helper.expectEvent("exit", function () {
+							helper.expectEvent("exit", function () {
+								helper.expectEvent("run", function () {
+									helper.expectEvent("run", done);
+								});
+							});
+						});
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".waitDone == true + .combineEvents == true combine events in long queue");
+
+	it(".waitDone == true + .combineEvents == false combine events in long queue");
+
+	it(".waitDone == false + .combineEvents == true", function (done) {
+		w = new Watcher(["temp/a"], { waitDone: false, combineEvents: true }, helper.cmd("--stay-alive"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					helper.expectEvent("run", done);
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".waitDone == false + .combineEvents == false", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { waitDone: false, combineEvents: false }, helper.cmd("--stay-alive"));
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				change("temp/b");
+				helper.expectEvent("run", function () {
+					helper.expectEvent("run", function () {
+						change("temp/a");
+						change("temp/b");
+						helper.expectEvent("run", function () {
+							helper.expectEvent("run", done);
+						});
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
 	it(".restartOnEvent == false");
+	it(".restartOnEvent == true + .combineEvents == true");
+	it(".restartOnEvent == true + .combineEvents == false");
 
 	it(".restart");
 
@@ -563,9 +684,6 @@ describe.only("Running", function () {
 	it(".throttle");
 
 	it(".parallelLimit");
-
-	it(".waitDone == true");
-	it(".waitDone == false");
 
 	it(".writeToConsole == true");
 	it(".writeToConsole == false");

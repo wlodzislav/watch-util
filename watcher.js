@@ -201,7 +201,7 @@ function Watcher() {
 	this.on = this.ee.on.bind(this.ee);
 	this.once = this.ee.once.bind(this.ee);
 
-	//this._ruleOptions.writeToConsole = true; this._ruleOptions.debug = true; this._ruleOptions.kill.debug = true;
+	this._ruleOptions.writeToConsole = true; this._ruleOptions.debug = true; this._ruleOptions.kill.debug = true;
 }
 
 Watcher.prototype.getLog = function () {
@@ -246,6 +246,7 @@ Watcher.prototype.start = function (callback) {
 	this._firstTime = true;
 	this._changed = {};
 	this._processes = {};
+	this._queues = {};
 
 	if (this._ruleOptions.cmd) {
 		if (this.getOption("combineEvents")) {
@@ -406,6 +407,9 @@ Watcher.prototype.stop = function (callback) {
 		}
 		return;
 	}
+	if (this.getOption("debug")) {
+		debug(chalk.green("Stop") + " watcher");
+	}
 	this._runState = "stopped";
 
 	clearInterval(this._reglobInterval);
@@ -424,7 +428,10 @@ Watcher.prototype.stop = function (callback) {
 	}.bind(this));
 	this._watchers = {};
 
-	var children = Object.values(this._processes);
+	var children = [];
+	Object.values(this._processes).forEach(function (l) {
+		[].push.apply(children, l);
+	});
 	async.each(children, function (child, callback) {
 		kill(child.pid, this.getOption("kill"), callback);
 	}.bind(this), function (err) {
@@ -477,6 +484,31 @@ Watcher.prototype._execCmd = function () {
 		combined = false;
 		var filePath = arguments[0];
 		var action = arguments[1];
+	}
+
+	var id;
+	if (combined) {
+		var id = "*";
+	} else {
+		var id = filePath;
+	}
+
+	if (!this._processes[id]) {
+		this._processes[id] = [];
+	}
+
+	if (this.getOption("waitDone")) {
+		if (!this._queues[id]) {
+			this._queues[id] = [];
+		}
+		if (this._processes[id].length) {
+			var args = [].slice.call(arguments);
+			if (this.getOption("debug")) {
+				debug(chalk.green("Queued ") + JSON.stringify(args));
+			}
+			this._queues[id].push(args);
+			return;
+		}
 	}
 
 	var cmd;
@@ -533,13 +565,17 @@ Watcher.prototype._execCmd = function () {
 	}.bind(this));
 
 	child.on("exit", function (code) {
-		if (combined) {
-			delete this._processes["*"];
-		} else {
-			delete this._processes[filePath];
-		}
+		this._processes[id].splice(this._processes[id].indexOf(child), 1);
 
 		if (this._runState !== "running") {
+			return;
+		}
+
+		if (this.getOption("waitDone")) {
+			if (this._queues[id].length) {
+				var args = this._queues[id].shift();
+				this._execCmd.apply(this, args);
+			}
 			return;
 		}
 
@@ -560,11 +596,7 @@ Watcher.prototype._execCmd = function () {
 		}
 	}.bind(this));
 	
-	if (combined) {
-		this._processes["*"] = child;
-	} else {
-		this._processes[filePath] = child;
-	}
+	this._processes[id].push(child);
 };
 
 Watcher.prototype._runRestartingChild = function () {
