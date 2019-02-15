@@ -198,8 +198,37 @@ describe("Watching", function () {
 		w.stop(done);
 	});
 
-	it("negate globs");
-	it("globs apply sequentially");
+	it("negate globs", function (done) {
+		w = new Watcher(["temp/a", "!temp/b"], callback);
+
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				change("temp/b");
+				expectCallback("temp/a", "change", function () {
+					expectNoCallback(500, done);
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it("globs apply sequentially", function (done) {
+		w = new Watcher(["temp/*", "!temp/a*", "temp/a1"], callback);
+
+		create("temp/a1");
+		create("temp/a2");
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a1");
+				create("temp/a2");
+				expectCallback("temp/a1", "change", function () {
+					expectNoCallback(500, done);
+				});
+			}, watcherStartDelay);
+		});
+	});
 
 	it("handle create", function (done) {
 		w = new Watcher(["temp/a"], callback);

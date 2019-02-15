@@ -1,6 +1,7 @@
 var fs = require("fs");
 var path = require("path");
 var stream = require("stream");
+var minimatch = require("minimatch");
 var childProcess = require("child_process");
 var EventEmitter = require("events");
 
@@ -106,37 +107,36 @@ function preprocessGlobPatters(patterns) {
 		if (p.startsWith("!") && !p.endsWith("**/*")) {
 			if (p.endsWith("/")) {
 				additional.push(p+"**/*");
-			} else {
-				additional.push(p+"/**/*");
 			}
 		}
 	});
 	return patterns.concat(additional);
 }
 
-function globWithNegates(patterns) {
-	var includePatterns = [];
-	var excludePatterns = [];
+function uniqArrStr(arr) {
+	var hash = {};
+	arr.forEach(function (p) {
+		hash[p] = true;
+	});
 
+	return Object.keys(hash);
+}
+
+function sequentialGlob(patterns) {
+	var result = [];
 	patterns.forEach(function (p) {
 		if (p.startsWith("!") && !p.startsWith("!(")) {
-			excludePatterns.push(p.substr(1));
+			var mm = new minimatch.Minimatch(p);
+			result = result.filter(function (f) {
+				return mm.match(f);
+			});
 		} else {
-			includePatterns.push(p);
+			var paths = glob.sync(p);
+			[].push.apply(result, paths);
 		}
 	});
 
-	var resultHash = {};
-	includePatterns.forEach(function (pattern) {
-		if (excludePatterns.length) {
-			var options = { ignore: excludePatterns };
-		}
-		var paths = glob.sync(pattern, options);
-		paths.forEach(function (p) {
-			resultHash[p] = true;
-		});
-	});
-	return Object.keys(resultHash);
+	return uniqArrStr(result);
 }
 
 function AlivePassThrough (options) {
@@ -699,7 +699,8 @@ Watcher.prototype._reglob = function () {
 	if (this._runState !== "running") {
 		return;
 	}
-	var paths = globWithNegates(preprocessGlobPatters(this._ruleOptions.globs));
+	var preprocessed = preprocessGlobPatters(this._ruleOptions.globs);
+	var paths = sequentialGlob(preprocessed);
 
 	paths.forEach(function (p) {
 		if (!this._watchers[p]) {
