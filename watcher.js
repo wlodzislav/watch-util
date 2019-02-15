@@ -1,5 +1,6 @@
 var fs = require("fs");
 var path = require("path");
+var stream = require("stream");
 var childProcess = require("child_process");
 var EventEmitter = require("events");
 
@@ -138,6 +139,274 @@ function globWithNegates(patterns) {
 	});
 	return Object.keys(resultHash);
 }
+
+function AlivePassThrough (options) {
+	stream.PassThrough.call(this, options);
+}
+
+AlivePassThrough.prototype = Object.create(stream.PassThrough.prototype);
+AlivePassThrough.prototype.constructor = AlivePassThrough;
+AlivePassThrough.prototype.end = function () {};
+
+function RestartRunner(options) {
+	this.options = Object.assign({}, this.defaults, options || {});
+
+	if (this.options.stdio[1] == "pipe") {
+		this.stdout = new AlivePassThrough();
+	}
+	if (this.options.stdio[2] == "pipe") {
+		this.stderr = new AlivePassThrough();
+	}
+
+	this.isStarted = false;
+
+	this.ee = new EventEmitter();
+	this.on = this.ee.on.bind(this.ee);
+}
+
+RestartRunner.prototype.defaults = {
+	restartOnError: true,
+	restartOnSuccess: true,
+	stdio: ["ignore", "pipe", "pipe"],
+	shell: true,
+	kill: {}
+};
+
+RestartRunner.prototype.start = function (entry, callback) {
+	var _callback = function () {
+		if (callback) {
+			callback.apply(null, arguments);
+			callback = null;
+		}
+	}
+
+	if (this.process) {
+		return;
+	}
+
+	this.isStarted = true;
+
+	var cmd;
+	if (typeof(this.options.cmd) == "function") {
+		cmd = this.options.cmd(entry);
+	} else {
+		cmd = this.options.cmd;
+	}
+
+	var child = exec(cmd, {
+		useShell: this.options.useShell,
+		customShell: this.options.customShell,
+		debug: this.options.debug
+	});
+
+	this.process = child;
+
+	if (this.options.stdio[1] == "inherit") {
+		child.stdout.pipe(process.stdout);
+	} else if (this.options.stdio[1] == "pipe") {
+		child.stdout.pipe(this.stdout);
+	}
+
+	if (this.options.stdio[2] == "inherit") {
+		child.stdout.pipe(process.stderr);
+	} else if (this.options.stdio[2] == "pipe") {
+		child.stderr.pipe(this.stderr);
+	}
+
+	child.on("exit", function (code) {
+		this.process = null;
+		if (!this.isStarted) {
+			return;
+		}
+		if (this.options.restartOnError && code != 0) {
+			this.start();
+		} else if (this.options.restartOnSuccess && code == 0) {
+			this.start();
+		}
+	}.bind(this));
+
+	child.on("error", function (err) {
+		if (callback) {
+			callback(err);
+			this.ee.emit("error", err);
+		}
+	});
+
+	if (child.pid) {
+		if (callback) {
+			setImmediate(callback);
+		}
+	}
+};
+
+RestartRunner.prototype.stop = function (callback) {
+	callback = callback || function () {};
+	this.isStarted = false;
+	if (this.process) {
+		var pid = this.process.pid;
+		this.process = null;
+		kill(pid, this.options.kill, callback);
+	} else {
+		setImmediate(callback);
+	}
+};
+
+RestartRunner.prototype.restart = function (entry, callback) {
+	this.stop(function () {
+		this.start(entry, callback);
+	}.bind(this));
+};
+
+function QueueRunner(options) {
+	this.options = Object.assign({}, this.defaults, options || {});
+
+	if (this.options.stdio[1] == "pipe") {
+		this.stdout = new AlivePassThrough();
+	}
+	if (this.options.stdio[2] == "pipe") {
+		this.stderr = new AlivePassThrough();
+	}
+
+	this.isStarted = false;
+	this.processes = [];
+
+	this.ee = new EventEmitter();
+	this.on = this.ee.on.bind(this.ee);
+}
+
+QueueRunner.prototype.defaults = {
+	parallelLimit: 8,
+	waitDone: true,
+	throttle: 0,
+	restartOnError: false,
+	stdio: ["ignore", "pipe", "pipe"],
+	shell: true,
+	kill: {}
+};
+
+QueueRunner.prototype.start = function (callback) {
+	var _callback = function () {
+		if (callback) {
+			callback.apply(null, arguments);
+			callback = null;
+		}
+	}
+
+	this.queue = [];
+	this.isStarted = true;
+	this.exec();
+}
+
+QueueRunner.prototype.push = function (entry) {
+	this.queue.push(entry);
+	if (this.options.debug) {
+		debug(chalk.green("Pushed") + " to queue " + JSON.stringify(entry));
+	}
+	if (this.options.reducer) {
+		this.queue = this.options.reducer(this.queue);
+	}
+
+	this.exec();
+};
+
+QueueRunner.prototype.exec = function () {
+	if (!this.isStarted) {
+		return;
+	}
+
+	if (this.processes.length >= this.options.parallelLimit) {
+		return;
+	}
+
+	if (!this.queue.length) {
+		return;
+	}
+
+	var entry;
+	if (this.options.skip) {
+		var runningEntries = this.processes.map(function (p) { return p.entry; });
+		var index = this.queue.findIndex(function (e) { return !this.options.skip(e, runningEntries); }.bind(this));
+		if (index != -1) {
+			entry = this.queue[index];
+			this.queue.splice(index, 1);
+		}
+	} else {
+		var entry = this.queue.shift();
+	}
+
+	if (!entry) {
+		return;
+	}
+
+	var cmd = entry.cmd || this.options.cmd(entry);
+
+	if (this.options.debug) {
+		debug(chalk.green("Exec ") + cmd);
+	}
+
+	var child = exec(cmd, {
+		useShell: this.options.useShell,
+		customShell: this.options.customShell,
+		debug: this.options.debug
+	});
+
+	this.processes.push(child);
+
+	if (this.options.stdio[1] == "inherit") {
+		child.stdout.pipe(process.stdout);
+	} else if (this.options.stdio[1] == "pipe") {
+		child.stdout.pipe(this.stdout);
+	}
+
+	if (this.options.stdio[2] == "inherit") {
+		child.stdout.pipe(process.stderr);
+	} else if (this.options.stdio[2] == "pipe") {
+		child.stderr.pipe(this.stderr);
+	}
+
+	child.on("exit", function (code) {
+		if (this.options.debug) {
+			debug(chalk.red("Exited ") + cmd);
+		}
+		if (!this.isStarted) {
+			return;
+		}
+		this.processes.splice(this.processes.indexOf(child), 1);
+		if (this.options.restartOnError && code != 0) {
+			if (this.options.debug) {
+				debug(chalk.green("Restart") + " on error "+ cmd);
+			}
+			this.push(entry);
+		}
+		this.exec();
+	}.bind(this));
+
+	child.on("error", function (err) {
+		this.ee.emit("error", err);
+	});
+
+	child.entry = entry;
+	child.cmd = cmd;
+
+	this.exec();
+};
+
+QueueRunner.prototype.stop = function (callback) {
+	callback = callback || function () {};
+	this.isStarted = false;
+	async.each(this.processes, function (c, callback) {
+		if (this.options.debug) {
+			debug(chalk.green("Kill ") + c.cmd);
+		}
+		kill(c.pid, this.options.kill, callback);
+	}.bind(this), callback);
+	this.processes = null;
+};
+
+QueueRunner.prototype.restart = function (callback) {
+	this.stop(this.start.bind(this, callback));
+};
+
 /*
 	new Watcher(globs, options, callback)
 	new Watcher(globs, options, cmd)
@@ -180,7 +449,7 @@ function Watcher() {
 	this._ruleOptions.cmd = cmd;
 	this._ruleOptions.callback = callback;
 
-	if (this._ruleOptions.run) {
+	if (this._ruleOptions.restart) {
 		this._ruleOptions.combineEvents = true;
 	}
 
@@ -188,20 +457,16 @@ function Watcher() {
 		this._ruleOptions.kill.debug = true;
 	}
 
-	if (this._ruleOptions.callback) {
-		this._ruleOptions.type = "exec";
-	}
-
 	this._runState = "stopped";
 
 	this._log = [];
 
 	this.ee = new EventEmitter();
-	this._rawEE = new EventEmitter();
 	this.on = this.ee.on.bind(this.ee);
-	this.once = this.ee.once.bind(this.ee);
 
-	//this._ruleOptions.writeToConsole = true; this._ruleOptions.debug = true; this._ruleOptions.kill.debug = true;
+	//this._ruleOptions.writeToConsole = true;
+	//this._ruleOptions.debug = true;
+	//this._ruleOptions.kill.debug = true;
 }
 
 Watcher.prototype.getLog = function () {
@@ -242,26 +507,69 @@ Watcher.prototype.start = function (callback) {
 	this._runState = "running";
 	this._watchers = {};
 
-	this._childRunning = null;
 	this._firstTime = true;
 	this._changed = {};
 	this._processes = {};
 	this._queues = {};
 
 	if (this._ruleOptions.cmd) {
-		if (this.getOption("combineEvents")) {
-			this._ruleOptions.callback = this._execCmd.bind(this);
-			if (this._ruleOptions.run) {
-				this._execCmd([]);
-			}
+		if (this._ruleOptions.restart) {
+			this._restartRunner = new RestartRunner(this._ruleOptions);
+			this._restartRunner.options.cmd = this._interpolateCombinedCmd.bind(this);
+			this._ruleOptions.callback = function (filePaths) {
+				this._restartRunner.restart(filePaths);
+			}.bind(this);
+			this._restartRunner.start();
 		} else {
-			this._ruleOptions.callback = this._execCmd.bind(this);
+			this._queueRunner = new QueueRunner(this._ruleOptions);
+			if (this.getOption("combineEvents")) {
+				if (this._ruleOptions.waitDone) {
+					this._queueRunner.options.parallelLimit = 1;
+				}
+				this._queueRunner.options.cmd = this._interpolateCombinedCmd.bind(this);
+				this._queueRunner.options.reducer = function (queue) {
+					var last = queue.pop();
+					var filePaths = last.filePaths.filter(function (f) {
+						return !queue.find(function (e) { return e.filePaths.indexOf(f) != -1; });
+					});
+					if (filePaths.length) {
+						queue.push({ filePaths });
+					}
+					return queue;
+				};
+				this._ruleOptions.callback = function (filePaths) {
+					this._queueRunner.push({ filePaths });
+				}.bind(this);
+			} else {
+				this._queueRunner.options.cmd = this._interpolateSeparateCmd.bind(this);
+				this._queueRunner.options.reducer = function (queue) {
+					var last = queue.pop();
+					;
+					var found = queue.find(function (e) { return e.filePath == last.filePath; });
+					if (found) {
+						found.action = last.action;
+					} else {
+						queue.push(last);
+					}
+					return queue;
+				};
+				this._queueRunner.options.skip = function (entry, running) {
+					if (this._ruleOptions.waitDone) {
+						var inProcessing = running.find(function (r) { return r.filePath == entry.filePath; });
+						return inProcessing;
+					} else {
+						return false;
+					}
+				}.bind(this);
+				this._ruleOptions.callback = function (filePath, action) {
+					this._queueRunner.push({ filePath, action });
+				}.bind(this);
+			}
+			this._queueRunner.start();
 		}
-
 	}
 
-	//console.log(this._ruleOptions);
-	if (this._ruleOptions.type === "exec") {
+	if (this._ruleOptions.callback || this.getOption("combineEvents")) {
 		this._callbackCombinedDebounced = debounce(this._callbackCombined.bind(this), this.getOption("debounce"));
 	}
 
@@ -428,132 +736,44 @@ Watcher.prototype.stop = function (callback) {
 	}.bind(this));
 	this._watchers = {};
 
-	this._queues = {};
-
-	var children = [];
-	Object.values(this._processes).forEach(function (l) {
-		[].push.apply(children, l);
-	});
-	async.each(children, function (child, callback) {
-		kill(child.pid, this.getOption("kill"), callback);
-	}.bind(this), function (err) {
-		if (err) { return callback(err); }
-		if (callback) {
-			callback();
-		}
-		this._processes = {};
-	}.bind(this));
-};
-
-Watcher.prototype._terminateChild = function (callback) {
-	if(!this._isTerminating) {
-		if (this.getOption("debug")) {
-			debug(chalk.green("Terminate ") + this._ruleOptions.cmd.toString().slice(0, 50));
-		}
-		this._isTerminating = true;
-		kill(this._childRunning.pid, {
-			signal: this.getOption("killSignal"),
-			checkInterval: this.getOption("killCheckInterval"),
-			retryInterval: this.getOption("killRetryInterval"),
-			retryCount: this.getOption("killRetryCount"),
-			timeout: this.getOption("killTimeout"),
-		}, function (err) {
-			if (err) {
-				console.log(err);
-				process.exit(1);
-			}
-			this._childRunning = null;
-			this._isTerminating = false;
-			this.ee.emit("terminated");
-			if (callback) { callback(); }
-		}.bind(this));
-	} else {
-		if (callback) {
-			this.once("terminated", callback);
-		}
+	if (this._restartRunner) {
+		this._restartRunner.stop(callback);
+	} else if (this._queueRunner) {
+		this._queueRunner.stop(callback);
 	}
 };
 
-Watcher.prototype._execCmd = function () {
-	var combined;
-	if (arguments.length == 1) {
-		combined = true;
-		var filePaths = arguments[0];
-	} else {
-		combined = false;
-		var filePath = arguments[0];
-		var action = arguments[1];
-	}
-
-	var id;
-	if (combined) {
-		var id = "*";
-	} else {
-		var id = filePath;
-	}
-
-	if (!this._processes[id]) {
-		this._processes[id] = [];
-	}
-
-	if (this.getOption("waitDone")) {
-		if (!this._queues[id]) {
-			this._queues[id] = [];
-		}
-		if (this._processes[id].length) {
-			if (combined) {
-				if (this.getOption("debug")) {
-					debug(chalk.green("Queued ") + JSON.stringify({ filePaths }));
-				}
-				if (this._queues[id].length) {
-					var last = this._queues[id][this._queues[id].length - 1];
-					filePaths.forEach(function (p) {
-						if (last.filePaths.indexOf(p) == -1) {
-							last.filePaths.push(p);
-						}
-					});
-				} else {
-					this._queues[id].push({ filePaths });
-				}
-			} else {
-				if (this.getOption("debug")) {
-					debug(chalk.green("Queued ") + JSON.stringify({ filePath, action }));
-				}
-				if (this._queues[id].length) {
-					var args = this._queues[id].find(function (args) {
-						return args.filePath == filePath;
-					});
-
-					if (args) {
-						args.action = action; // overwrite action to match the last event
-					} else {
-						this._queues[id].push({ filePath, action });
-					}
-				} else {
-					this._queues[id].push({ filePath, action });
-				}
-			}
-			return;
-		}
-	}
-
+Watcher.prototype._interpolateCombinedCmd = function (options) {
+	options = options || [];
+	var filePaths = options.filePaths || [];
 	var cmd;
 	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
-		if (combined) {
-			var cwd = path.resolve(".")
-			var relFiles = filePaths.join(" ");
-			var files = filePaths.map(function (f) { return path.resolve(f); }).join(" ");
-		} else {
-			var cwd = path.resolve(".")
-			var relFile = filePath;
-			var file = path.resolve(filePath);
-			var relDir = path.dirname(filePath);
-			var dir = path.resolve(path.dirname(filePath));
-		}
+		var cwd = path.resolve(".")
+		var relFiles = filePaths.join(" ");
+		var files = filePaths.map(function (f) { return path.resolve(f); }).join(" ");
 		cmd = this._ruleOptions.cmd
 			.replace("%cwd", cwd)
 			.replace("%relFiles", relFiles || "")
-			.replace("%files", files || "")
+			.replace("%files", files || "");
+	} else {
+		cmd = this._ruleOptions.cmd;
+	}
+
+	return cmd;
+}
+
+Watcher.prototype._interpolateSeparateCmd = function (options) {
+	var filePath = options.filePath;
+	var action = options.action;
+	var cmd;
+	if (this._ruleOptions.cmd.indexOf("%") !== -1) {
+		var cwd = path.resolve(".")
+		var relFile = filePath;
+		var file = path.resolve(filePath);
+		var relDir = path.dirname(filePath);
+		var dir = path.resolve(path.dirname(filePath));
+		cmd = this._ruleOptions.cmd
+			.replace("%cwd", cwd)
 			.replace("%event", action || "")
 			.replace("%relFile", relFile || "")
 			.replace("%file", file || "")
@@ -563,138 +783,7 @@ Watcher.prototype._execCmd = function () {
 		cmd = this._ruleOptions.cmd;
 	}
 
-	if (this.getOption("debug")) {
-		debug(chalk.green("Exec ") + cmd);
-	}
-
-	var child = exec(cmd, {
-		writeToConsole: this.getOption("writeToConsole"),
-		useShell: this.getOption("useShell"),
-		customShell: this.getOption("customShell"),
-		debug: this.getOption("debug")
-	});
-
-	child.stdout.on("data", function (buffer) {
-		var text = buffer.toString();
-		if (this.getOption("writeToConsole")) {
-			console.log(text.replace(/\n$/, ""));
-		}
-		this._writeLog({ stream: "stdout", text: text });
-	}.bind(this));
-
-	child.stderr.on("data", function (buffer) {
-		var text = buffer.toString();
-		if (this.getOption("writeToConsole")) {
-			console.error(text.replace(/\n$/, ""));
-		}
-		this._writeLog({ stream: "stderr", text: text });
-	}.bind(this));
-
-	child.on("exit", function (code) {
-		this._processes[id].splice(this._processes[id].indexOf(child), 1);
-
-		if (this._runState !== "running") {
-			return;
-		}
-
-		if (this.getOption("waitDone")) {
-			if (this._queues[id].length) {
-				var args = this._queues[id].shift();
-				if (combined) {
-					this._execCmd(args.filePaths);
-				} else {
-					this._execCmd(args.filePath, args.action);
-				}
-			}
-			return;
-		}
-
-		var restart = false;
-		if (this.getOption("restartOnError") && code != 0) {
-			restart = true;
-		}
-		if (this.getOption("restartOnSuccess") && code == 0) {
-			restart = true;
-		}
-
-		if (restart) {
-			if (combined) {
-				this._execCmd(filePaths);
-			} else {
-				this._execCmd(filePath, action);
-			}
-		}
-	}.bind(this));
-	
-	this._processes[id].push(child);
-};
-
-Watcher.prototype._runRestartingChild = function () {
-	/*
-	if (this.getOption("debug")) {
-		debug(chalk.green("Run ") + this._ruleOptions.cmd.toString());
-	}
-
-	this._childRunning = exec(this._ruleOptions.cmd, {
-		writeToConsole: this.getOption("writeToConsole"),
-		useShell: this.getOption("useShell"),
-		customShell: this.getOption("customShell"),
-		debug: this.getOption("debug")
-	});
-	var childRunning = this._childRunning;
-
-	this._childRunning.stdout.on("data", function (buffer) {
-		var text = buffer.toString();
-		if (this.getOption("writeToConsole")) {
-			console.log(text.replace(/\n$/, ""));
-		}
-		this._writeLog({ stream: "stdout", text: text });
-	}.bind(this));
-
-	this._childRunning.stderr.on("data", function (buffer) {
-		var text = buffer.toString();
-		if (this.getOption("writeToConsole")) {
-			console.error(text.replace(/\n$/, ""));
-		}
-		this._writeLog({ stream: "stderr", text: text });
-	}.bind(this));
-
-	this._childRunning.on("exit", function (code) {
-		if (!(childRunning.killed || code === null)) { // not killed
-			this._childRunning = null;
-			if (this._runState !== "running") {
-				return;
-			}
-			if (this.getOption("restartOnSuccess") && code === 0) {
-				this._runRestartingChild();
-			}
-			if (this.getOption("restartOnError") && code !== 0) {
-				this._runRestartingChild();
-			}
-		} else {
-			this._childRunning = null;
-		}
-	}.bind(this));
-	*/
-};
-
-Watcher.prototype._restartChild = function () {
-	/*
-	if (this._childRunning) {
-		this._terminateChild(function (err) {
-			if(err){
-				console.error(chalk.red("Terminating error: ") + err.message);
-				process.exit(1);
-			}
-			// check for case when watcher is stopped while reloading cmd is terminating
-			if (this._runState === "running") {
-				this._runRestartingChild();
-			}
-		}.bind(this));
-	} else {
-		this._runRestartingChild();
-	}
-	*/
+	return cmd;
 };
 
 module.exports = Watcher;

@@ -92,6 +92,7 @@ CMDHelper.prototype.cmd = function (args) {
 }
 
 CMDHelper.prototype.expectEvent = function () {
+	var args = arguments;
 	if (arguments.length == 3) {
 		var event = arguments[0];
 		var options = arguments[1];
@@ -114,7 +115,6 @@ CMDHelper.prototype.expectEvent = function () {
 	if (this._events.length) {
 		var e = this._events.shift();
 		this._callback(e);
-		this._callback = null;
 	}
 }
 
@@ -134,7 +134,6 @@ CMDHelper.prototype.expectNoEvents = function (delay, callback) {
 		clearTimeout(timeout);
 		var e = this._events.shift();
 		this._callback(e);
-		this._callback = null;
 	}
 }
 
@@ -345,7 +344,7 @@ describe("Watching", function () {
 	it(".reglob");
 });
 
-describe("Running", function () {
+describe.only("Running", function () {
 	var helper;
 
 	beforeEach(function () {
@@ -451,7 +450,7 @@ describe("Running", function () {
 	it("don't restart throttled cmd in .stop()");
 	it("don't restart throttled cmd in .stop() + .combineEvents = true");
 
-	it(".restartOnError == true", function (done) {
+	it(".restartOnError == true, exec", function (done) {
 		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 200"));
 
 		create("temp/a");
@@ -467,7 +466,7 @@ describe("Running", function () {
 		});
 	});
 
-	it(".restartOnError == true + .combineEvents == true", function (done) {
+	it(".restartOnError == true + .combineEvents == true, exec", function (done) {
 		w = new Watcher(["temp/a"], { restartOnError: true, combineEvents: true }, helper.cmd("--exit 1 --delay 200"));
 
 		create("temp/a");
@@ -483,7 +482,7 @@ describe("Running", function () {
 		});
 	});
 
-	it("kill in .stop + .restartOnError == true", function (done) {
+	it("kill in .stop + .restartOnError == true, exec", function (done) {
 		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 200"));
 
 		create("temp/a");
@@ -503,7 +502,7 @@ describe("Running", function () {
 	});
 
 
-	it(".restartOnError == false", function (done) {
+	it(".restartOnError == false, exec", function (done) {
 		w = new Watcher(["temp/a"], { restartOnError: false }, helper.cmd("--exit 1"));
 
 		create("temp/a");
@@ -519,8 +518,8 @@ describe("Running", function () {
 		});
 	});
 
-	it(".restartOnSuccess == true", function (done) {
-		w = new Watcher(["temp/a"], { restartOnSuccess: true }, helper.cmd("--exit 0 --delay 200"));
+	it(".restartOnSuccess == true, restart", function (done) {
+		w = new Watcher(["temp/a"], { restartOnSuccess: true, restart: true }, helper.cmd("--exit 0 --delay 200"));
 
 		create("temp/a");
 		w.start(function () {
@@ -535,13 +534,11 @@ describe("Running", function () {
 		});
 	});
 
-	it(".restartOnSuccess == false", function (done) {
-		w = new Watcher(["temp/a"], { restartOnSuccess: false }, helper.cmd("--exit 0"));
+	it(".restartOnSuccess == false, restart", function (done) {
+		w = new Watcher(["temp/a"], { restartOnSuccess: false, restart: true }, helper.cmd("--exit 0"));
 
-		create("temp/a");
 		w.start(function () {
 			setTimeout(function () {
-				change("temp/a");
 				helper.expectEvent("run", function () {
 					helper.expectEvent("exit", function () {
 						helper.expectNoEvents(500, done);
@@ -551,16 +548,34 @@ describe("Running", function () {
 		});
 	});
 
-	it(".run == true", function (done) {
-		w = new Watcher(["temp/a"], { run: true }, helper.cmd("--stay-alive"));
+	it(".restart == true starting", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
 
 		w.start(function () {
 			helper.expectEvent("run", done);
 		});
 	});
 
-	it(".run == false", function (done) {
-		w = new Watcher(["temp/a"], { run: false }, helper.cmd("--stay-alive"));
+	it(".restart == true restart on event", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					helper.expectEvent("killed", function () {
+						helper.expectEvent("run", function () {
+							helper.expectNoEvents(500, done);
+						});
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".restart == false", function (done) {
+		w = new Watcher(["temp/a"], { restart: false }, helper.cmd("--stay-alive"));
 
 		w.start(function () {
 			helper.expectNoEvents(500, done);
@@ -577,23 +592,6 @@ describe("Running", function () {
 				helper.expectEvent("run", function () {
 					change("temp/a");
 					helper.expectNoEvents(500, done);
-				});
-			}, watcherStartDelay);
-		});
-	});
-
-	it("rerun .waitDone == true + .combineEvents == true", function (done) {
-		w = new Watcher(["temp/a"], { waitDone: true, combineEvents: true }, helper.cmd("--delay 500"));
-
-		create("temp/a");
-		w.start(function () {
-			setTimeout(function () {
-				change("temp/a");
-				helper.expectEvent("run", function () {
-					change("temp/a");
-					helper.expectEvent("exit", function () {
-						helper.expectEvent("run", done);
-					});
 				});
 			}, watcherStartDelay);
 		});
@@ -619,7 +617,24 @@ describe("Running", function () {
 		});
 	});
 
-	it("rerun .waitDone == true + .combineEvents == false", function (done) {
+	it("run 2 time .waitDone == true + .combineEvents == true", function (done) {
+		w = new Watcher(["temp/a"], { waitDone: true, combineEvents: true }, helper.cmd("--delay 500"));
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				helper.expectEvent("run", function () {
+					change("temp/a");
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", done);
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it("run 2 time .waitDone == true + .combineEvents == false", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { waitDone: true, combineEvents: false }, helper.cmd("--delay 500"));
 
 		create("temp/a");
