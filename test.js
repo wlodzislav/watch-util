@@ -79,7 +79,7 @@ function rm(f) {
 
 function CMDHelper() {
 	this._events = [];
-	this.tmp = path.join(__dirname, "log");
+	this.tmp = path.join(__dirname, "temp", "log-" + Date.now());
 	var tmp = this.tmp;
 	this.clean();
 	this.start();
@@ -809,10 +809,10 @@ describe("Running", function () {
 		});
 	});
 
-	it(".useShell == true");
-	it(".useShell == false");
+	it(".shell == true");
+	it(".shell == false");
 
-	it(".customShell");
+	it("custom .shell");
 
 	it(".throttle");
 
@@ -870,14 +870,170 @@ describe("Running", function () {
 });
 
 describe("API", function () {
+	var w, helper;
+
+	beforeEach(function () {
+		rimraf.sync("temp");
+		fs.mkdirSync("temp");
+		helper = new CMDHelper();
+	});
+
+	afterEach(function (done) {
+		rimraf.sync("temp");
+		w.stop(function () {
+			helper.clean();
+			killBash("test-helper.js");
+			done();
+		});
+	});
+
 	it(".on(\"create\")");
 	it(".on(\"change\")");
 	it(".on(\"delete\")");
 	it(".on(\"all\")");
-	it(".on(\"exec\")");
-	it(".on(\"reload\")");
-	it(".on(\"killed\")");
-	it(".on(\"crashed\")");
-	it(".on(\"exited\")");
+
+	it(".on(\"exec\")", function (done) {
+		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));
+		w.start(function () {
+			create("temp/a");
+			w.once("exec", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"exec\") + .restart", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w.once("exec", function () {
+			w.once("exec", function () {
+				done();
+			});
+		});
+		w.start(function () {
+			create("temp/a");
+		});
+	});
+
+	it(".on(\"restart\")", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w.start(function () {
+			create("temp/a");
+			w.once("restart", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"kill\") + .restart", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive wtf"));
+		w.start(function () {
+			create("temp/a");
+			w.once("kill", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"kill\") + .stop", function (done) {
+		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));
+		w.start(function () {
+			create("temp/a");
+			helper.expectEvent("run", function () {
+				w.stop();
+				w.once("kill", function () {
+					done();
+				});
+			});
+		});
+	});
+
+	it(".on(\"kill\") + .stop + .restart", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w.start(function () {
+			w.stop();
+			w.once("kill", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"crash\")", function (done) {
+		w = new Watcher(["temp/a"], helper.cmd("--exit 1"));
+		w.start(function () {
+			create("temp/a");
+			w.on("crash", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"crash\") + .restart", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--exit 1 --delay 500"));
+		w.start(function () {
+			w.once("crash", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"error\")", function (done) {
+		w = new Watcher(["temp/a"], { shell: false }, "non-existing-cmd");
+		w.start(function () {
+			create("temp/a");
+			w.once("error", function () {
+				done();
+			});
+		});
+	});
+
+	it(".on(\"error\") + restart", function (done) {
+		w = new Watcher(["temp/a"], { shell: false, restart: true }, "non-existing-cmd");
+		w.start();
+		w.once("error", function () {
+			done();
+		});
+	});
+
+	it(".on(\"exit\") code = 0", function (done) {
+		w = new Watcher(["temp/a"], helper.cmd("--exit 0"));
+		w.start(function () {
+			create("temp/a");
+			w.once("exit", function (code) {
+				assert.equal(code, 0);
+				done();
+			});
+		});
+	});
+
+	it(".on(\"exit\") code = 0 + .restart", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--exit 0 --delay 500"));
+		w.start(function () {
+			w.once("exit", function (code) {
+				assert.equal(code, 0);
+				done();
+			});
+		});
+	});
+
+	it(".on(\"exit\") code = 1", function (done) {
+		w = new Watcher(["temp/a"], helper.cmd("--exit 1"));
+		w.start(function () {
+			create("temp/a");
+			w.once("exit", function (code) {
+				assert.equal(code, 1);
+				done();
+			});
+		});
+	});
+
+	it(".on(\"exit\") code = 1 + .restart", function (done) {
+		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--exit 1 --delay 500"));
+		w.start(function () {
+			w.once("exit", function (code) {
+				assert.equal(code, 1);
+				done();
+			});
+		});
+	});
 });
 

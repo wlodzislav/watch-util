@@ -6,7 +6,9 @@ function sendEventSync(event, data) {
 	data = data || {};
 	data.timestamp = Date.now();
 	//console.log("send", event, data);
-	fs.appendFileSync(program.log, JSON.stringify({ event, data }) + "\n", "utf8");
+	try {
+		fs.appendFileSync(program.log, JSON.stringify({ event, data }) + "\n", "utf8");
+	} catch (err) {}
 
 }
 process.on("uncaughtException", function (err) {

@@ -49,31 +49,17 @@ function checkShAvailableOnWin() {
 
 
 function exec(cmd, options) {
-	if (options.useShell) {
-		if (options.customShell) {
-			var shellExecutable = options.customShell.split(" ")[0];
-			var child = childProcess.spawn(shellExecutable, options.customShell.split(" ").slice(1).concat([cmd]), { stdio: ["ignore", "pipe", "pipe"] });
+	var child;
+	if (options.shell) {
+		if (typeof(options.shell) == "string") {
+			var shellExecutable = options.shell.split(" ")[0];
+			child = childProcess.spawn(shellExecutable, options.shell.split(" ").slice(1).concat([cmd]), { shell: false, stdio: options.stdio });
 		} else {
-			if (process.platform === 'win32') {
-				if (isShAvailableOnWin === undefined) {
-					isShAvailableOnWin = checkShAvailableOnWin();
-					if (isShAvailableOnWin && options.debug) {
-						debug("Will use " + chalk.yellow("'C:\\\\bin\\\\sh.exe'") + " as default shell.");
-					}
-				}
-
-				if (isShAvailableOnWin) {
-					var child = childProcess.spawn("/bin/sh", ["-c", cmd], { stdio: options.stdio });
-				} else {
-					var child = childProcess.spawn(cmd, { shell: true, stdio: options.stdio });
-				}
-			} else {
-				var child = childProcess.spawn(cmd, { shell: true, stdio: options.stdio });
-			}
+			child = childProcess.spawn(cmd, { shell: true, stdio: options.stdio });
 		}
 	} else {
 		var splittedCmd = cmd.split(" ");
-		var child = childProcess.spawn(splittedCmd[0], splittedCmd.slice(1), { shell: false, stdio: options.stdio });
+		child = childProcess.spawn(splittedCmd[0], splittedCmd.slice(1), { shell: false, stdio: options.stdio });
 	}
 
 	return child;
@@ -154,7 +140,6 @@ function RestartRunner(options) {
 	this.isStarted = false;
 
 	this.ee = new EventEmitter();
-	this.on = this.ee.on.bind(this.ee);
 }
 
 RestartRunner.prototype.defaults = {
@@ -163,6 +148,18 @@ RestartRunner.prototype.defaults = {
 	stdio: ["ignore", "pipe", "pipe"],
 	shell: true,
 	kill: {}
+};
+
+RestartRunner.prototype.on = function () {
+	return this.ee.on.apply(this.ee, arguments);
+};
+
+RestartRunner.prototype.once = function () {
+	return this.ee.once.apply(this.ee, arguments);
+};
+
+RestartRunner.prototype.off = function () {
+	return this.ee.off.apply(this.ee, arguments);
 };
 
 RestartRunner.prototype.start = function (entry, callback) {
@@ -186,14 +183,9 @@ RestartRunner.prototype.start = function (entry, callback) {
 		cmd = this.options.cmd;
 	}
 
-	if (this.options.debug) {
-		debug(chalk.green("Exec ") + cmd);
-	}
-
 	var child = exec(cmd, {
-		useShell: this.options.useShell,
+		shell: this.options.shell,
 		stdio: this.options.stdio,
-		customShell: this.options.customShell,
 		debug: this.options.debug
 	});
 
@@ -216,8 +208,18 @@ RestartRunner.prototype.start = function (entry, callback) {
 			debug(chalk.red("Exited ") + cmd);
 		}
 
+		this.ee.emit("exit", code, cmd);
+
+		if (code != 0) {
+			this.ee.emit("crash", code, cmd);
+		}
+
 		if (!this.isStarted) {
 			return;
+		}
+
+		if (this._isRestating) {
+			return
 		}
 		if (this.options.restartOnError && code != 0) {
 			if (this.options.debug) {
@@ -228,25 +230,26 @@ RestartRunner.prototype.start = function (entry, callback) {
 			if (this.options.debug) {
 				debug(chalk.green("Restart") + " on success " + cmd);
 			}
-			if (!this._isRestating) {
-				this.start();
-			}
+			this.start();
 		}
 	}.bind(this));
 
 	child.on("error", function (err) {
-		if (callback) {
-			callback(err);
-			this.ee.emit("error", err);
-		}
-	});
+		this.process = null;
+		this.ee.emit("error", err, cmd);
+		_callback(err);
+	}.bind(this));
 
 	child.cmd = cmd;
 
+	if (this.options.debug) {
+		debug(chalk.green("Exec ") + "pid=" + child.pid + " " + cmd);
+	}
+
+	this.ee.emit("exec", cmd);
+
 	if (child.pid) {
-		if (callback) {
-			setImmediate(callback);
-		}
+		setImmediate(_callback);
 	}
 };
 
@@ -257,14 +260,26 @@ RestartRunner.prototype.stop = function (callback) {
 
 RestartRunner.prototype.kill = function (callback) {
 	callback = callback || function () {};
-	if (this.process) {
+	if (this.isKilling) {
+		return setImmediate(callback);
+	}
+
+	if (this.process && this.process.pid) {
+
+		this.isKilling = true;
+		this.ee.emit("kill", this.process.cmd);
 		var pid = this.process.pid;
+		var cmd = this.process.cmd;
+
 		if (this.options.debug) {
-			debug(chalk.green("Kill ") + this.process.cmd);
+			debug(chalk.red("Kill ") + this.process.cmd);
 		}
+
 		kill(pid, this.options.kill, function () {
+			this.isKilling = false;
+			this.ee.emit("kill", cmd);
 			this.process = null;
-			callback();
+			callback()
 		}.bind(this));
 	} else {
 		setImmediate(callback);
@@ -273,10 +288,11 @@ RestartRunner.prototype.kill = function (callback) {
 
 RestartRunner.prototype.restart = function (entry, callback) {
 	callback = callback || function () {};
+	this.ee.emit("restart");
 	this._isRestating = true;
 	this.kill(function () {
+		this._isRestating = false;
 		if (this.isStarted) {
-			this._isRestating = false;
 			this.start(entry, callback);
 		} else {
 			setImmediate(callback);
@@ -300,8 +316,8 @@ function QueueRunner(options) {
 	this.processes = [];
 
 	this.ee = new EventEmitter();
-	this.on = this.ee.on.bind(this.ee);
 }
+
 
 QueueRunner.prototype.defaults = {
 	parallelLimit: 8,
@@ -311,6 +327,18 @@ QueueRunner.prototype.defaults = {
 	stdio: ["ignore", "pipe", "pipe"],
 	shell: true,
 	kill: {}
+};
+
+QueueRunner.prototype.on = function () {
+	return this.ee.on.apply(this.ee, arguments);
+};
+
+QueueRunner.prototype.once = function () {
+	return this.ee.once.apply(this.ee, arguments);
+};
+
+QueueRunner.prototype.off = function () {
+	return this.ee.off.apply(this.ee, arguments);
 };
 
 QueueRunner.prototype.start = function (callback) {
@@ -369,13 +397,8 @@ QueueRunner.prototype.exec = function () {
 
 	var cmd = entry.cmd || this.options.cmd(entry);
 
-	if (this.options.debug) {
-		debug(chalk.green("Exec ") + cmd);
-	}
-
 	var child = exec(cmd, {
-		useShell: this.options.useShell,
-		customShell: this.options.customShell,
+		shell: this.options.shell,
 		stdio: this.options.stdio,
 		debug: this.options.debug
 	});
@@ -396,6 +419,13 @@ QueueRunner.prototype.exec = function () {
 		if (this.options.debug) {
 			debug(chalk.red("Exited ") + cmd);
 		}
+
+		this.ee.emit("exit", code, cmd);
+
+		if (code != 0) {
+			this.ee.emit("crash", code, cmd);
+		}
+
 		if (!this.isStarted) {
 			return;
 		}
@@ -410,11 +440,18 @@ QueueRunner.prototype.exec = function () {
 	}.bind(this));
 
 	child.on("error", function (err) {
+		this.processes.splice(this.processes.indexOf(child), 1);
 		this.ee.emit("error", err);
-	});
+	}.bind(this));
 
 	child.entry = entry;
 	child.cmd = cmd;
+
+	if (this.options.debug) {
+		debug(chalk.green("Exec ") + "pid=" + child.pid + " " + cmd);
+	}
+
+	this.ee.emit("exec", cmd);
 
 	this.exec();
 };
@@ -423,11 +460,22 @@ QueueRunner.prototype.stop = function (callback) {
 	callback = callback || function () {};
 	this.isStarted = false;
 	async.each(this.processes, function (c, callback) {
+		var cmd = c.cmd;
 		if (this.options.debug) {
-			debug(chalk.green("Kill ") + c.cmd);
+			debug(chalk.red("Kill ") + c.cmd);
 		}
-		kill(c.pid, this.options.kill, callback);
-	}.bind(this), callback);
+
+		if (!c.pid) {
+			return setInterval(callback);
+		}
+
+		kill(c.pid, this.options.kill, function () {
+			this.ee.emit("kill", cmd);
+			callback();
+		}.bind(this));
+	}.bind(this), function () {
+		callback();
+	}.bind(this));
 	this.processes = null;
 };
 
@@ -483,7 +531,7 @@ function Watcher() {
 		}
 	}
 
-	if (this._ruleOptions.debug) {
+	if (this._ruleOptions.debug && options.kill && !options.kill.hasOwnProperty("debug")) {
 		this._ruleOptions.kill.debug = true;
 	}
 
@@ -499,6 +547,8 @@ function Watcher() {
 
 	this.ee = new EventEmitter();
 	this.on = this.ee.on.bind(this.ee);
+	this.once = this.ee.once.bind(this.ee);
+	this.off = this.ee.off.bind(this.ee);
 
 	this._runState = "stopped";
 	this._matcher = globsMatcher(this._ruleOptions.globs);
@@ -509,7 +559,7 @@ function Watcher() {
 
 	//this._ruleOptions.debug = true;
 	//this._ruleOptions.kill.debug = true;
-
+	
 }
 
 Watcher.prototype.defaultOptions = {
@@ -521,8 +571,7 @@ Watcher.prototype.defaultOptions = {
 	events: ["create", "change", "delete"],
 	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
 	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
-	useShell: true, // run in shell
-	customShell: "", // custom shell to run cmds, if not set - run in default shell
+	shell: true, // run in shell or pass custom shell
 	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
 	writeToConsole: false, // write logs to console
 	mtimeCheck: true, // check modified time before firing events
@@ -588,6 +637,10 @@ Watcher.prototype.start = function (callback) {
 					this._restartRunner.stderr.pipe(this.stderr);
 				}
 			}
+
+			// HACK: substitute ee to passthrough events
+			this._restartRunner.ee = this.ee;
+
 			this._restartRunner.start();
 		} else {
 			this._queueRunner = new QueueRunner(this._ruleOptions);
@@ -644,6 +697,10 @@ Watcher.prototype.start = function (callback) {
 					this._queueRunner.stderr.pipe(this.stderr);
 				}
 			}
+
+			// HACK: substitute ee to passthrough events
+			this._queueRunner.ee = this.ee;
+
 			this._queueRunner.start();
 		}
 	}
@@ -658,9 +715,7 @@ Watcher.prototype.start = function (callback) {
 	this._reglobInterval = setInterval(this._reglob.bind(this), this.getOption("reglob"));
 
 	if (callback) {
-		setTimeout(function () {
-			callback();
-		}, 0);
+		setImmediate(callback);
 	} else {
 		return this;
 	}
@@ -716,15 +771,12 @@ Watcher.prototype._fireEvent = function (filePath, action) {
 
 
 Watcher.prototype._checkDelete = function (p) {
-	console.log("_checkDelete");
 	var interval = setInterval(function () {
-		console.log("interval");
 		try {
 			var stat = fs.statSync(p);
 		} catch (err) {}
 
 		if (stat) {
-			console.log(p, stat);
 			clearInterval(interval);
 			clearTimeout(timeout);
 			this._fireEvent(p, "change");
@@ -732,7 +784,6 @@ Watcher.prototype._checkDelete = function (p) {
 	}.bind(this), this._ruleOptions.deleteCheckInterval);
 
 	var timeout = setTimeout(function () {
-		console.log("timeout");
 		this._fireEvent(p, "delete");
 		clearInterval(interval);
 	}.bind(this), this._ruleOptions.deleteCheckTimeout);
@@ -834,7 +885,6 @@ Watcher.prototype._reglob = function () {
 		return paths.indexOf(p) == -1 && dirs.indexOf(p) == -1;
 	})
 
-	console.log({ pathsToDelete });
 	pathsToDelete.forEach(function (p) {
 		this._watchers[p].close();
 		delete this._watchers[p];
