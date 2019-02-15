@@ -468,13 +468,19 @@ function Watcher() {
 		}
 	}
 
-	this._ruleOptions = Object.assign({}, this.defaultOptions, options || {});
+	this._ruleOptions = Object.assign({}, this.defaultOptions, options);
 	this._ruleOptions.globs = globs;
 	this._ruleOptions.cmd = cmd;
 	this._ruleOptions.callback = callback;
 
 	if (this._ruleOptions.restart) {
 		this._ruleOptions.combineEvents = true;
+		if (!options.hasOwnProperty("restartOnError")) {
+			this._ruleOptions.restartOnError = true;
+		}
+		if (!options.hasOwnProperty("restartOnSuccess")) {
+			this._ruleOptions.restartOnSuccess = true;
+		}
 	}
 
 	if (this._ruleOptions.debug) {
@@ -511,8 +517,7 @@ Watcher.prototype.defaultOptions = {
 	reglob: 50, // perform reglob to watch added files
 	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
-	restartOnEvent: false, // restart if file changed
-	run: false, // run immediately without waiting for events
+	restart: false, // run as persistent process
 	events: ["create", "change", "delete"],
 	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
 	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
