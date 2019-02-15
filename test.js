@@ -13,6 +13,7 @@ function opts(options) {
 }
 
 var callbackArguments = [];
+var _callback;
 var callback = function () {
 	if (_callback) {
 		_callback.apply(null, arguments);
@@ -241,6 +242,18 @@ describe("Watching", function () {
 		});
 	});
 
+	it("watch dirs to handle create", function (done) {
+		w = new Watcher(["temp/*"], { reglob: 10000 }, callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/b");
+				expectCallback("temp/b", "create", done);
+			}, watcherStartDelay);
+		});
+	});
+
 	it("handle change", function (done) {
 		w = new Watcher(["temp/a"], callback);
 
@@ -277,6 +290,19 @@ describe("Watching", function () {
 		});
 	});
 
+	it("handle rename", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				fs.renameSync("temp/a", "temp/b");
+				expectCallback("temp/b", "create", function () {
+					expectCallback("temp/a", "delete", done);
+				});
+			}, watcherStartDelay);
+		});
+	});
 	it(".events", function (done) {
 		w = new Watcher(["temp/a"], { events: ["create", "change"] }, callback);
 
@@ -370,7 +396,16 @@ describe("Watching", function () {
 	it("dont't fire throttled combined callback after .stop()");
 	it("dont't fire throttled separate callback after .stop()");
 
-	it(".reglob");
+	it(".reglob", function (done) {
+		w = new Watcher(["temp/a"], { reglob: 10000 }, callback);
+
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a");
+				expectNoCallback(500, done);
+			}, watcherStartDelay);
+		});
+	});
 });
 
 describe("Running", function () {

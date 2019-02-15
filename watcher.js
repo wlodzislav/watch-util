@@ -37,25 +37,6 @@ function debounce(fun, duration) {
 	return debouncer;
 };
 
-var defaultOptions = {
-	debounce: 200, // exec/reload once in ms at max
-	reglob: 50, // perform reglob to watch added files
-	restartOnError: false, // restart if exit code != 0
-	restartOnSuccess: false, // restart if exit code == 0
-	restartOnEvent: false, // restart if file changed
-	run: false, // run immediately without waiting for events
-	events: ["create", "change", "delete"],
-	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
-	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
-	useShell: true, // run in shell
-	customShell: "", // custom shell to run cmds, if not set - run in default shell
-	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
-	writeToConsole: false, // write logs to console
-	mtimeCheck: true, // check modified time before firing events
-	kill: {},
-	debug: false, // debug logging
-};
-
 var isShAvailableOnWin = undefined;
 function checkShAvailableOnWin() {
 	try {
@@ -123,6 +104,7 @@ function uniqArrStr(arr) {
 }
 
 function sequentialGlob(patterns) {
+	patterns = preprocessGlobPatters(patterns);
 	var result = [];
 	patterns.forEach(function (p) {
 		if (p.startsWith("!") && !p.startsWith("!(")) {
@@ -137,6 +119,16 @@ function sequentialGlob(patterns) {
 	});
 
 	return uniqArrStr(result);
+}
+
+function globsMatcher(patterns) {
+	patterns = preprocessGlobPatters(patterns);
+	var matchers = patterns.map(function (p) {
+		return new minimatch.Minimatch(p);
+	});
+	return function (f) {
+		return matchers.every(function (m) { return m.match(f); })
+	};
 }
 
 function AlivePassThrough (options) {
@@ -476,7 +468,7 @@ function Watcher() {
 		}
 	}
 
-	this._ruleOptions = Object.assign({}, defaultOptions, options || {});
+	this._ruleOptions = Object.assign({}, this.defaultOptions, options || {});
 	this._ruleOptions.globs = globs;
 	this._ruleOptions.cmd = cmd;
 	this._ruleOptions.callback = callback;
@@ -489,13 +481,6 @@ function Watcher() {
 		this._ruleOptions.kill.debug = true;
 	}
 
-	this._runState = "stopped";
-
-	this._log = [];
-
-	this.ee = new EventEmitter();
-	this.on = this.ee.on.bind(this.ee);
-
 	if (this._ruleOptions.stdio) {
 		if (this._ruleOptions.stdio[1] == "pipe") {
 			this.stdout = new AlivePassThrough();
@@ -506,11 +491,42 @@ function Watcher() {
 		}
 	}
 
-	//console.log(this._ruleOptions);
-	//this._ruleOptions.writeToConsole = true;
+	this.ee = new EventEmitter();
+	this.on = this.ee.on.bind(this.ee);
+
+	this._runState = "stopped";
+	this._matcher = globsMatcher(this._ruleOptions.globs);
+
+	this._debouncers = {};
+	this._watchers = {};
+	this._changed = {};
+
 	//this._ruleOptions.debug = true;
 	//this._ruleOptions.kill.debug = true;
+
 }
+
+Watcher.prototype.defaultOptions = {
+	debounce: 200, // exec/reload once in ms at max
+	reglob: 50, // perform reglob to watch added files
+	restartOnError: false, // restart if exit code != 0
+	restartOnSuccess: false, // restart if exit code == 0
+	restartOnEvent: false, // restart if file changed
+	run: false, // run immediately without waiting for events
+	events: ["create", "change", "delete"],
+	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
+	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
+	useShell: true, // run in shell
+	customShell: "", // custom shell to run cmds, if not set - run in default shell
+	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
+	writeToConsole: false, // write logs to console
+	mtimeCheck: true, // check modified time before firing events
+	kill: {},
+	deleteCheckInterval: 25, // check if file reappeared
+	deleteCheckTimeout: 100, // "debounce" for delete for 2 stage save, when file is renamed and replaced with new one
+	debug: false, // debug logging
+};
+
 
 Watcher.prototype.getLog = function () {
 	return this._log;
@@ -528,11 +544,11 @@ Watcher.prototype._writeLog = function (entry) {
 
 Watcher.prototype.getOption = function (name) {
 	if (this._pm) {
-		return [this._ruleOptions[name], this._pm._globalOptions[name], defaultOptions[name]].find(function (v) {
+		return [this._ruleOptions[name], this._pm._globalOptions[name], this.defaultOptions[name]].find(function (v) {
 			return v != null;
 		});
 	} else {
-		return [this._ruleOptions[name], defaultOptions[name]].find(function (v) {
+		return [this._ruleOptions[name], this.defaultOptions[name]].find(function (v) {
 			return v != null;
 		});
 	}
@@ -548,12 +564,7 @@ Watcher.prototype.start = function (callback) {
 		}
 	}
 	this._runState = "running";
-	this._watchers = {};
-
 	this._firstTime = true;
-	this._changed = {};
-	this._processes = {};
-	this._queues = {};
 
 	if (this._ruleOptions.cmd) {
 		if (this._ruleOptions.restart) {
@@ -658,8 +669,7 @@ Watcher.prototype._callbackCombined = function () {
 	this._changed = {};
 }
 
-Watcher.prototype._callbackSingle = function (filePath) {
-	var action = this._changed[filePath].action;
+Watcher.prototype._callbackSingle = function (filePath, action) {
 	if (this.getOption("debug")) {
 		debug(chalk.green("Call") + " callback for path=" + chalk.yellow(filePath) + " action=" + action);
 	}
@@ -667,7 +677,11 @@ Watcher.prototype._callbackSingle = function (filePath) {
 	this._ruleOptions.callback(filePath, action);
 }
 
-Watcher.prototype._onWatcherEvent = function (filePath, action) {
+Watcher.prototype._fireEvent = function (filePath, action) {
+	if (this._runState != "running") {
+		return;
+	}
+
 	if (this.getOption("debug")) {
 		debug(chalk.green("Fire") + " watcher: path=" + chalk.yellow(filePath) + " action=" + action);
 	}
@@ -687,7 +701,7 @@ Watcher.prototype._onWatcherEvent = function (filePath, action) {
 			if (!this._debouncers[filePath]) {
 				this._debouncers[filePath] = debounce(function () {
 					delete this._debouncers[filePath];
-					this._callbackSingle(filePath);
+					this._callbackSingle(filePath, action);
 				}.bind(this), this.getOption("debounce"));
 			}
 			this._debouncers[filePath]();
@@ -695,79 +709,136 @@ Watcher.prototype._onWatcherEvent = function (filePath, action) {
 	}
 };
 
+
+Watcher.prototype._checkDelete = function (p) {
+	console.log("_checkDelete");
+	var interval = setInterval(function () {
+		console.log("interval");
+		try {
+			var stat = fs.statSync(p);
+		} catch (err) {}
+
+		if (stat) {
+			console.log(p, stat);
+			clearInterval(interval);
+			clearTimeout(timeout);
+			this._fireEvent(p, "change");
+		}
+	}.bind(this), this._ruleOptions.deleteCheckInterval);
+
+	var timeout = setTimeout(function () {
+		console.log("timeout");
+		this._fireEvent(p, "delete");
+		clearInterval(interval);
+	}.bind(this), this._ruleOptions.deleteCheckTimeout);
+};
+
+Watcher.prototype._watchFile = function (p) {
+	this._watchers[p] = fs.watch(p, function (action) {
+		if (this._runState !== "running") {
+			return;
+		}
+
+		if (action == "rename") {
+			try {
+				var stat = fs.statSync(p);
+			} catch (err) {
+			}
+
+			if (stat) {
+				this._fireEvent(p, "change");
+			} else {
+				this._checkDelete(p);
+			}
+
+			if (this.getOption("debug")) {
+				debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p));
+			}
+
+			this._watchers[p].close();
+			delete this._watchers[p];
+			// try to rewatch
+		} else {
+			this._fireEvent(p, "change");
+		}
+	}.bind(this));
+
+	if (this.getOption("debug")) {
+		debug(chalk.green("Created") + " watcher: path=" + chalk.yellow(p));
+	}
+};
+
+Watcher.prototype._watchDir = function (d) {
+	this._watchers[d] = fs.watch(d, function (action, fileName) {
+		if (this._runState !== "running") {
+			return;
+		}
+
+		var filePath = path.join(d, fileName);
+		if (this._watchers[filePath]) {
+			return;
+		}
+
+		if (this._matcher(filePath)) {
+			try {
+				var stat = fs.statSync(filePath);
+			} catch (err) {
+			}
+
+			if (stat) {
+				this._fireEvent(filePath, "create");
+				this._watchFile(filePath);
+			}
+		}
+	}.bind(this));
+
+	if (this.getOption("debug")) {
+		debug(chalk.green("Created") + " watcher: path=" + chalk.yellow(d));
+	}
+};
+
 Watcher.prototype._reglob = function () {
 	if (this._runState !== "running") {
 		return;
 	}
-	var preprocessed = preprocessGlobPatters(this._ruleOptions.globs);
-	var paths = sequentialGlob(preprocessed);
 
+	var paths = sequentialGlob(this._ruleOptions.globs);
 	paths.forEach(function (p) {
-		if (!this._watchers[p]) {
-			var rewatch = function () {
-				if (this._watchers[p]) {
-					if (this.getOption("debug")) {
-						debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p));
-					}
-					this._watchers[p].close();
-				} else {
-				}
-				try {
-					var stat = fs.statSync(p);
-					var mtime = stat.mtime;
-				} catch (err) {
-					return setTimeout(reglob, 0);
-				}
-				this._watchers[p] = fs.watch(p, function (action) {
-					try {
-						stat = fs.statSync(p);
-					} catch (err) {
-						if (err.code == "ENOENT") {
-							this._watchers[p].close();
-							delete this._watchers[p];
-							this._onWatcherEvent(p, "delete");
-							return;
-						}
-					}
-					if (action == "rename") {
-						setTimeout(rewatch, 0);
-					}
+		if (this._watchers[p]) {
+			return;
+		}
 
-					if (this.getOption("mtimeCheck")) {
-						if (stat.mtime > mtime) {
-							this._onWatcherEvent(p, "change");
-							mtime = stat.mtime;
-						}
-					} else {
-						this._onWatcherEvent(p, "change");
-					}
-				}.bind(this));
-				if (this.getOption("debug")) {
-					debug(chalk.green("Created") + " watcher: path=" + chalk.yellow(p));
-				}
-			}.bind(this);
+		this._watchFile(p);
 
-			rewatch();
-
-			if (!this._firstTime) {
-				this._onWatcherEvent(p, "create");
-			}
+		if (!this._firstTime) {
+			this._fireEvent(p, "create");
 		}
 	}.bind(this));
+	
+	var dirs = paths.map(function (p) { return path.dirname(p); });
+	dirs.forEach(function (d) {
+		if (this._watchers[d]) {
+			return;
+		}
 
-	Object.keys(this._watchers).forEach(function (p) {
-		if (paths.indexOf(p) == -1) {
-			if (this.getOption("debug")) {
-				debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p) + " id=" + this._watchers[p].id);
-			}
-			// catch deletions that happened right after reglob
-			if (this._watchers[p]) {
-				this._watchers[p].close();
-				delete this._watchers[p];
-				this._onWatcherEvent(p, "delete");
-			}
+		this._watchDir(d);
+	}.bind(this));
+
+	/*
+	var pathsToDelete = Object.keys(this._watchers).filter(function (p) {
+		return paths.indexOf(p) == -1 && dirs.indexOf(p) == -1;
+	})
+
+	console.log({ pathsToDelete });
+	pathsToDelete.forEach(function (p) {
+		this._watchers[p].close();
+		delete this._watchers[p];
+
+		if (this.getOption("debug")) {
+			debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p));
 		}
 	}.bind(this));
+	*/
 
 	this._firstTime = false;
 };
