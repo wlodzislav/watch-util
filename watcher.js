@@ -37,7 +37,6 @@ function debounce(fun, duration) {
 };
 
 var defaultOptions = {
-	type: "exec",
 	debounce: 200, // exec/reload once in ms at max
 	reglob: 50, // perform reglob to watch added files
 	restartOnError: false, // restart if exit code != 0
@@ -82,17 +81,17 @@ function exec(cmd, options) {
 				}
 
 				if (isShAvailableOnWin) {
-					var child = childProcess.spawn("/bin/sh", ["-c", cmd], { stdio: ["ignore", "pipe", "pipe"] });
+					var child = childProcess.spawn("/bin/sh", ["-c", cmd], { stdio: options.stdio });
 				} else {
-					var child = childProcess.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+					var child = childProcess.spawn(cmd, { shell: true, stdio: options.stdio });
 				}
 			} else {
-				var child = childProcess.spawn(cmd, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+				var child = childProcess.spawn(cmd, { shell: true, stdio: options.stdio });
 			}
 		}
 	} else {
 		var splittedCmd = cmd.split(" ");
-		var child = childProcess.spawn(splittedCmd[0], splittedCmd.slice(1), { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+		var child = childProcess.spawn(splittedCmd[0], splittedCmd.slice(1), { shell: false, stdio: options.stdio });
 	}
 
 	return child;
@@ -151,11 +150,13 @@ AlivePassThrough.prototype.end = function () {};
 function RestartRunner(options) {
 	this.options = Object.assign({}, this.defaults, options || {});
 
-	if (this.options.stdio[1] == "pipe") {
-		this.stdout = new AlivePassThrough();
-	}
-	if (this.options.stdio[2] == "pipe") {
-		this.stderr = new AlivePassThrough();
+	if (this.options.stdio) {
+		if (this.options.stdio[1] == "pipe") {
+			this.stdout = new AlivePassThrough();
+		}
+		if (this.options.stdio[2] == "pipe") {
+			this.stderr = new AlivePassThrough();
+		}
 	}
 
 	this.isStarted = false;
@@ -193,35 +194,51 @@ RestartRunner.prototype.start = function (entry, callback) {
 		cmd = this.options.cmd;
 	}
 
+	if (this.options.debug) {
+		debug(chalk.green("Exec ") + cmd);
+	}
+
 	var child = exec(cmd, {
 		useShell: this.options.useShell,
+		stdio: this.options.stdio,
 		customShell: this.options.customShell,
 		debug: this.options.debug
 	});
 
 	this.process = child;
 
-	if (this.options.stdio[1] == "inherit") {
-		child.stdout.pipe(process.stdout);
-	} else if (this.options.stdio[1] == "pipe") {
-		child.stdout.pipe(this.stdout);
-	}
+	if (this.options.stdio) {
+		if (this.options.stdio[1] == "pipe") {
+			child.stdout.pipe(this.stdout);
+		}
 
-	if (this.options.stdio[2] == "inherit") {
-		child.stdout.pipe(process.stderr);
-	} else if (this.options.stdio[2] == "pipe") {
-		child.stderr.pipe(this.stderr);
+		if (this.options.stdio[2] == "pipe") {
+			child.stderr.pipe(this.stderr);
+		}
 	}
 
 	child.on("exit", function (code) {
 		this.process = null;
+
+		if (this.options.debug) {
+			debug(chalk.red("Exited ") + cmd);
+		}
+
 		if (!this.isStarted) {
 			return;
 		}
 		if (this.options.restartOnError && code != 0) {
+			if (this.options.debug) {
+				debug(chalk.green("Restart") + " on error "+  cmd);
+			}
 			this.start();
 		} else if (this.options.restartOnSuccess && code == 0) {
-			this.start();
+			if (this.options.debug) {
+				debug(chalk.green("Restart") + " on success " + cmd);
+			}
+			if (!this._isRestating) {
+				this.start();
+			}
 		}
 	}.bind(this));
 
@@ -232,6 +249,8 @@ RestartRunner.prototype.start = function (entry, callback) {
 		}
 	});
 
+	child.cmd = cmd;
+
 	if (child.pid) {
 		if (callback) {
 			setImmediate(callback);
@@ -240,31 +259,49 @@ RestartRunner.prototype.start = function (entry, callback) {
 };
 
 RestartRunner.prototype.stop = function (callback) {
-	callback = callback || function () {};
 	this.isStarted = false;
+	this.kill(callback);
+};
+
+RestartRunner.prototype.kill = function (callback) {
+	callback = callback || function () {};
 	if (this.process) {
 		var pid = this.process.pid;
-		this.process = null;
-		kill(pid, this.options.kill, callback);
+		if (this.options.debug) {
+			debug(chalk.green("Kill ") + this.process.cmd);
+		}
+		kill(pid, this.options.kill, function () {
+			this.process = null;
+			callback();
+		}.bind(this));
 	} else {
 		setImmediate(callback);
 	}
 };
 
 RestartRunner.prototype.restart = function (entry, callback) {
-	this.stop(function () {
-		this.start(entry, callback);
+	callback = callback || function () {};
+	this._isRestating = true;
+	this.kill(function () {
+		if (this.isStarted) {
+			this._isRestating = false;
+			this.start(entry, callback);
+		} else {
+			setImmediate(callback);
+		}
 	}.bind(this));
 };
 
 function QueueRunner(options) {
 	this.options = Object.assign({}, this.defaults, options || {});
 
-	if (this.options.stdio[1] == "pipe") {
-		this.stdout = new AlivePassThrough();
-	}
-	if (this.options.stdio[2] == "pipe") {
-		this.stderr = new AlivePassThrough();
+	if (this.options.stdio) {
+		if (this.options.stdio[1] == "pipe") {
+			this.stdout = new AlivePassThrough();
+		}
+		if (this.options.stdio[2] == "pipe") {
+			this.stderr = new AlivePassThrough();
+		}
 	}
 
 	this.isStarted = false;
@@ -347,21 +384,20 @@ QueueRunner.prototype.exec = function () {
 	var child = exec(cmd, {
 		useShell: this.options.useShell,
 		customShell: this.options.customShell,
+		stdio: this.options.stdio,
 		debug: this.options.debug
 	});
 
 	this.processes.push(child);
 
-	if (this.options.stdio[1] == "inherit") {
-		child.stdout.pipe(process.stdout);
-	} else if (this.options.stdio[1] == "pipe") {
-		child.stdout.pipe(this.stdout);
-	}
+	if (this.options.stdio) {
+		if (this.options.stdio[1] == "pipe") {
+			child.stdout.pipe(this.stdout);
+		}
 
-	if (this.options.stdio[2] == "inherit") {
-		child.stdout.pipe(process.stderr);
-	} else if (this.options.stdio[2] == "pipe") {
-		child.stderr.pipe(this.stderr);
+		if (this.options.stdio[2] == "pipe") {
+			child.stderr.pipe(this.stderr);
+		}
 	}
 
 	child.on("exit", function (code) {
@@ -401,10 +437,6 @@ QueueRunner.prototype.stop = function (callback) {
 		kill(c.pid, this.options.kill, callback);
 	}.bind(this), callback);
 	this.processes = null;
-};
-
-QueueRunner.prototype.restart = function (callback) {
-	this.stop(this.start.bind(this, callback));
 };
 
 /*
@@ -464,6 +496,17 @@ function Watcher() {
 	this.ee = new EventEmitter();
 	this.on = this.ee.on.bind(this.ee);
 
+	if (this._ruleOptions.stdio) {
+		if (this._ruleOptions.stdio[1] == "pipe") {
+			this.stdout = new AlivePassThrough();
+		}
+
+		if (this._ruleOptions.stdio[2] == "pipe") {
+			this.stderr = new AlivePassThrough();
+		}
+	}
+
+	//console.log(this._ruleOptions);
 	//this._ruleOptions.writeToConsole = true;
 	//this._ruleOptions.debug = true;
 	//this._ruleOptions.kill.debug = true;
@@ -519,6 +562,16 @@ Watcher.prototype.start = function (callback) {
 			this._ruleOptions.callback = function (filePaths) {
 				this._restartRunner.restart(filePaths);
 			}.bind(this);
+
+			if (this._ruleOptions.stdio) {
+				if (this._ruleOptions.stdio[1] == "pipe") {
+					this._restartRunner.stdout.pipe(this.stdout);
+				}
+
+				if (this._ruleOptions.stdio[2] == "pipe") {
+					this._restartRunner.stderr.pipe(this.stderr);
+				}
+			}
 			this._restartRunner.start();
 		} else {
 			this._queueRunner = new QueueRunner(this._ruleOptions);
@@ -564,6 +617,16 @@ Watcher.prototype.start = function (callback) {
 				this._ruleOptions.callback = function (filePath, action) {
 					this._queueRunner.push({ filePath, action });
 				}.bind(this);
+			}
+
+			if (this._ruleOptions.stdio) {
+				if (this._ruleOptions.stdio[1] == "pipe") {
+					this._queueRunner.stdout.pipe(this.stdout);
+				}
+
+				if (this._ruleOptions.stdio[2] == "pipe") {
+					this._queueRunner.stderr.pipe(this.stderr);
+				}
 			}
 			this._queueRunner.start();
 		}
@@ -614,7 +677,10 @@ Watcher.prototype._onWatcherEvent = function (filePath, action) {
 	}
 	this._changed[filePath] = { action: action, filePath: filePath };
 
-	if (this._ruleOptions.type === "exec") {
+	if (this.restart) {
+		this._changed[filePath] = { action: action, filePath: filePath };
+		this._callbackCombinedDebounced();
+	} else {
 		if (this.getOption("combineEvents")) {
 			this._callbackCombinedDebounced();
 		} else {
@@ -626,9 +692,6 @@ Watcher.prototype._onWatcherEvent = function (filePath, action) {
 			}
 			this._debouncers[filePath]();
 		}
-	} else {
-		this._changed[filePath] = { action: action, filePath: filePath };
-		this._callbackCombinedDebounced();
 	}
 };
 
@@ -709,14 +772,19 @@ Watcher.prototype._reglob = function () {
 };
 
 Watcher.prototype.stop = function (callback) {
+	var _callback = function () {
+		if (this.getOption("debug")) {
+			debug(chalk.green("Stoped") + " watcher");
+		}
+		if (callback) {
+			callback();
+		}
+	}.bind(this);
 	if (this._runState == "stopped") {
 		if (callback) {
 			callback();
 		}
 		return;
-	}
-	if (this.getOption("debug")) {
-		debug(chalk.green("Stop") + " watcher");
 	}
 	this._runState = "stopped";
 
@@ -737,9 +805,11 @@ Watcher.prototype.stop = function (callback) {
 	this._watchers = {};
 
 	if (this._restartRunner) {
-		this._restartRunner.stop(callback);
+		this._restartRunner.stop(_callback);
 	} else if (this._queueRunner) {
-		this._queueRunner.stop(callback);
+		this._queueRunner.stop(_callback);
+	} else {
+		setImmediate(_callback);
 	}
 };
 

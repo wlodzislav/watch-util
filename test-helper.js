@@ -5,7 +5,7 @@ var program = require("commander");
 function sendEventSync(event, data) {
 	data = data || {};
 	data.timestamp = Date.now();
-	console.log("send", event, data);
+	//console.log("send", event, data);
 	fs.appendFileSync(program.log, JSON.stringify({ event, data }) + "\n", "utf8");
 
 }
@@ -70,9 +70,11 @@ if (program.stayAlive) {
 		}
 	}
 	setTimeout(function () {
-		console.log("exit");
 		sendEventSync("exit")
 		process.exit(program.exit || 0);
 	}, program.delay || 0);
 }
+
+console.log("OUTPUT");
+console.error("ERROR");
 

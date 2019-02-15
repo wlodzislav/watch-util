@@ -344,8 +344,8 @@ describe("Watching", function () {
 	it(".reglob");
 });
 
-describe.only("Running", function () {
-	var helper;
+describe("Running", function () {
+	var w, helper;
 
 	beforeEach(function () {
 		rimraf.sync("temp");
@@ -745,12 +745,6 @@ describe.only("Running", function () {
 		});
 	});
 
-	it(".restartOnEvent == false");
-	it(".restartOnEvent == true + .combineEvents == true");
-	it(".restartOnEvent == true + .combineEvents == false");
-
-	it(".restart");
-
 	it(".useShell == true");
 	it(".useShell == false");
 
@@ -758,10 +752,49 @@ describe.only("Running", function () {
 
 	it(".throttle");
 
-	it(".parallelLimit");
+	it(".parallelLimit", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { waitDone: true, combineEvents: false, parallelLimit: 1 }, helper.cmd("--delay 500"));
 
-	it(".writeToConsole == true");
-	it(".writeToConsole == false");
+		create("temp/a");
+		create("temp/b");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				change("temp/b");
+				helper.expectEvent("run", function () {
+					helper.expectEvent("exit", function () {
+						helper.expectEvent("run", function () {
+							helper.expectEvent("exit", done);
+						});
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".stdio pipe", function (done) {
+		w = new Watcher(["temp/a"], { stdio: [null, "pipe", "pipe"] }, helper.cmd());
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				var receivedOut = false;
+				var receivedErr = false;
+				change("temp/a");
+				w.stdout.on("data", function (data) {
+					receivedOut = true;
+					if (receivedOut && receivedErr) {
+						done();
+					}
+				});
+				w.stderr.on("data", function (data) {
+					receivedErr = true;
+					if (receivedOut && receivedErr) {
+						done();
+					}
+				});
+			}, watcherStartDelay);
+		});
+	});
 
 	it(".checkMtime == true");
 	it(".checkMtime == false");
@@ -773,8 +806,6 @@ describe.only("Running", function () {
 });
 
 describe("API", function () {
-	it(".stop() + .start()");
-
 	it(".on(\"create\")");
 	it(".on(\"change\")");
 	it(".on(\"delete\")");
@@ -784,9 +815,5 @@ describe("API", function () {
 	it(".on(\"killed\")");
 	it(".on(\"crashed\")");
 	it(".on(\"exited\")");
-
-	it(".stdout");
-	it(".stderr");
-	it(".stdin");
 });
 
