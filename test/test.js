@@ -3,10 +3,9 @@ var fs = require("fs");
 var path = require("path");
 var EventEmitter = require("events");
 
-var touch = require("touch");
 var rimraf = require("rimraf");
 
-var Watcher = require("./watcher");
+var Watcher = require("../");
 
 function opts(options) {
 	return Object.assign({}, defaultOptions, options || {});
@@ -79,14 +78,14 @@ function rm(f) {
 
 function CMDHelper() {
 	this._events = [];
-	this.tmp = path.join(__dirname, "temp", "log-" + Date.now());
+	this.tmp = path.join("temp", "log-" + Date.now());
 	var tmp = this.tmp;
 	this.clean();
 	this.start();
 }
 
 CMDHelper.prototype.cmd = function (args) {
-	return "node test-helper.js --event %event %cwd --rel-file %relFile --file %file --rel-dir %relDir --dir %dir "
+	return "node " + path.join(__dirname, "test-helper.js") + " --event %event %cwd --rel-file %relFile --file %file --rel-dir %relDir --dir %dir "
 		+ args
 		+ " --log " + this.tmp
 		+ " -- %relFiles -- %files";

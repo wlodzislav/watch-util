@@ -2,16 +2,15 @@
   "name": "wwatch",
   "version": "0.0.0",
   "description": "",
-  "main": "watcher.js",
+  "main": "index.js",
   "scripts": {
-    "test": "mocha test.js --colors --bail --timeout 5000"
+    "test": "mocha test/test.js --colors --bail --timeout 5000"
   },
   "author": "Vladislav Kaminsky <wlodzislav@ya.ru>",
   "license": "MIT",
   "devDependencies": {
     "mocha": "^3.2.0",
-    "rimraf": "^2.6.3",
-    "touch": "^3.1.0"
+    "rimraf": "^2.6.3"
   },
   "dependencies": {
     "async": "^2.5.0",
