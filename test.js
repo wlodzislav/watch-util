@@ -833,11 +833,42 @@ describe("Running", function () {
 		});
 	});
 
-	it(".shell == true");
+	it(".shell == true", function (done) {
+		w = new Watcher(["temp/a"], { shell: true }, "VAR=1; echo $VAR");
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a");
+			}, watcherStartDelay);
+		});
+		w.once("exec", function (err) {
+			done();
+		});
+	});
 
-	it(".shell == false");
+	it(".shell == false", function (done) {
+		w = new Watcher(["temp/a"], { shell: false }, "VAR=1; echo $VAR");
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a");
+			}, watcherStartDelay);
+		});
+		w.once("error", function (err) {
+			done();
+		});
+	});
 
-	it("custom .shell");
+	it("custom .shell", function (done) {
+		w = new Watcher(["temp/a"], { shell: "node -e", stdio: [null, "pipe", "pipe"] }, "console.log(123)");
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a");
+			}, watcherStartDelay);
+		});
+		w.stdout.once("data", function (data) {
+			assert.equal(data.toString(), "123\n");
+			done();
+		});
+	});
 
 	it(".throttle + .combineEvents = true", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { combineEvents: true, throttle: 1000 }, helper.cmd());
