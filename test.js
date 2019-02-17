@@ -984,8 +984,6 @@ describe("Running", function () {
 
 	it(".checkMD5 == true");
 	it(".checkMD5 == false");
-
-	it(".stdin");
 });
 
 describe("API", function () {
