@@ -24,20 +24,20 @@ var callback = function () {
 
 function expectCallback() {
 	if (arguments.length == 3) {
-		var fileName = arguments[0];
+		var filePath = arguments[0];
 		var event = arguments[1];
 		var callback = arguments[2];
 		_callback = function (f, e) {
-			assert.equal(f, fileName);
+			assert.equal(f, filePath);
 			assert.equal(e, event);
 			_callback = null;
 			callback();
 		}
 	} else {
-		var fileNames = arguments[0];
+		var filePaths = arguments[0];
 		var callback = arguments[1];
 		_callback = function (f) {
-			assert.deepEqual(f, fileNames);
+			assert.deepEqual(f, filePaths);
 			_callback = null;
 			callback();
 		}
@@ -887,10 +887,84 @@ describe("API", function () {
 		});
 	});
 
-	it(".on(\"create\")");
-	it(".on(\"change\")");
-	it(".on(\"delete\")");
-	it(".on(\"all\")");
+	it(".on(\"create\")", function (done) {
+		w = new Watcher(["temp/a"]);
+		w.start(function () {
+			create("temp/a");
+			w.once("create", function (filePath) {
+				assert.equal(filePath, "temp/a");
+				done();
+			});
+		});
+	});
+
+	it(".on(\"change\")", function (done) {
+		w = new Watcher(["temp/a"]);
+		create("temp/a");
+		w.start(function () {
+			change("temp/a");
+			w.once("change", function (filePath) {
+				assert.equal(filePath, "temp/a");
+				done();
+			});
+		});
+	});
+
+	it(".on(\"delete\")", function (done) {
+		w = new Watcher(["temp/a"]);
+		create("temp/a");
+		w.start(function () {
+			rimraf.sync("temp/a");
+			w.once("delete", function (filePath) {
+				assert.equal(filePath, "temp/a");
+				done();
+			});
+		});
+	});
+
+	it(".on(\"all\")", function (done) {
+		w = new Watcher(["temp/a"]);
+		w.start(function () {
+			create("temp/a");
+			w.once("all", function (filePath, action) {
+				assert.equal(filePath, "temp/a");
+				assert.equal(action, "create");
+				change("temp/a");
+				w.once("all", function (filePath, action) {
+					assert.equal(filePath, "temp/a");
+					assert.equal(action, "change");
+					rimraf.sync("temp/a");
+					w.once("all", function (filePath, action) {
+						assert.equal(filePath, "temp/a");
+						assert.equal(action, "delete");
+						done();
+					});
+				});
+			});
+		});
+	});
+
+	it(".on(\"all\") + .combinedEvents = true", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { combineEvents: true, debounce: 500 });
+		w.start(function () {
+			create("temp/a");
+			create("temp/b");
+			w.once("all", function (filePaths) {
+				assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
+				change("temp/a");
+				change("temp/b");
+				w.once("all", function (filePaths) {
+					assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
+					rimraf.sync("temp/a");
+					rimraf.sync("temp/b");
+					w.once("all", function (filePaths) {
+						assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
+						done();
+					});
+				});
+			});
+		});
+	});
 
 	it(".on(\"exec\")", function (done) {
 		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));

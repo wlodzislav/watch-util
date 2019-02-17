@@ -725,7 +725,12 @@ Watcher.prototype._callbackCombined = function () {
 	if (this.getOption("debug")) {
 		debug(chalk.green("Call") + " callback for " + chalk.yellow(Object.keys(this._changed).join(", ")));
 	}
-	this._ruleOptions.callback(Object.keys(this._changed));
+	var filePaths = Object.keys(this._changed);
+	if (this._ruleOptions.callback) {
+		this._ruleOptions.callback(filePaths);
+	}
+	this.ee.emit("change", filePaths);
+	this.ee.emit("all", filePaths);
 	this._changed = {};
 }
 
@@ -734,7 +739,11 @@ Watcher.prototype._callbackSingle = function (filePath, action) {
 		debug(chalk.green("Call") + " callback for path=" + chalk.yellow(filePath) + " action=" + action);
 	}
 	this._changed[filePath] = null;
-	this._ruleOptions.callback(filePath, action);
+	if (this._ruleOptions.callback) {
+		this._ruleOptions.callback(filePath, action);
+	}
+	this.ee.emit(action, filePath);
+	this.ee.emit("all", filePath, action);
 }
 
 Watcher.prototype._fireEvent = function (filePath, action) {
