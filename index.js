@@ -142,7 +142,7 @@ function Watcher() {
 	}
 
 	this.options = Object.assign({}, this.defaults, options);
-	this.options.globs = globs;
+	this.options.globs = this.options.globs || globs;
 	this.options.cmd = cmd;
 	this.options.callback = callback;
 
@@ -177,36 +177,25 @@ function Watcher() {
 
 	this._runState = "stopped";
 	this._matcher = globsMatcher(this.options.globs);
-
-	this._debouncers = {};
-	this._watchers = {};
-	this._changed = {};
-	this._md5s = {};
-
-	//this.options.debug = true;
-	//this.options.kill.debug = true;
-	
 }
 
 Watcher.prototype.defaults = {
-	debounce: 200, // exec/reload only after no events for N ms
+	debounce: 50, // exec/reload only after no events for N ms
 	throttle: 0, // exec/reload no more then once every N ms
-	reglob: 50, // perform reglob to watch added files
+	reglob: 1000, // perform reglob to watch added files
 	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
 	restart: false, // run as persistent process
 	events: ["create", "change", "delete"],
+	combineEvents: false, // run single cmd for all changes or separate
 	checkMD5: false,
-	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
+	checkMtime: true, // check modified time before firing events, to handle 2 stage save in editors
+	deleteCheckInterval: 25, // check if file reappeared
+	deleteCheckTimeout: 100, // "debounce" for delete for 2 stage save, when file is renamed and replaced with new one
 	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
 	shell: true, // run in shell or pass custom shell
 	stdio: [null, "ignore", "ignore"],
-	maxLogEntries: 100, // max log entries to store for each watcher, Note! entry could be multiline
-	writeToConsole: false, // write logs to console
-	mtimeCheck: true, // check modified time before firing events
 	kill: {},
-	deleteCheckInterval: 25, // check if file reappeared
-	deleteCheckTimeout: 100, // "debounce" for delete for 2 stage save, when file is renamed and replaced with new one
 	debug: false, // debug logging
 };
 
@@ -222,6 +211,12 @@ Watcher.prototype.start = function (callback) {
 	}
 	this._runState = "running";
 	this._firstTime = true;
+
+	this._debouncers = {};
+	this._watchers = {};
+	this._changed = {};
+	this._md5s = {};
+	this._mtimes = {};
 
 	if (this.options.cmd) {
 		if (this.options.restart) {
@@ -318,16 +313,10 @@ Watcher.prototype.start = function (callback) {
 	}
 
 
-	this._reglob();
+	this._reglob(callback);
 	this._debouncers = {};
 
 	this._reglobInterval = setInterval(this._reglob.bind(this), this.options.reglob);
-
-	if (callback) {
-		setImmediate(callback);
-	} else {
-		return this;
-	}
 };
 
 Watcher.prototype._callbackCombined = function () {
@@ -407,60 +396,131 @@ Watcher.prototype._checkDelete = function (p) {
 		if (stat) {
 			clearInterval(interval);
 			clearTimeout(timeout);
-			this._optionalMD5Check(p, function () {
-				this._fireEvent(p, "change");
+			this._optionalMtimeCheck(p, function () {
+				this._optionalMD5Check(p, function () {
+					this._rewatchFile(p);
+					this._fireEvent(p, "change");
+				}.bind(this));
 			}.bind(this));
 		}
 	}.bind(this), this.options.deleteCheckInterval);
 
 	var timeout = setTimeout(function () {
-		this._fireEvent(p, "delete");
+		clearInterval(interval);
 		if (!this.options.combineEvents) {
 			delete this._debouncers[p];
 		}
-		clearInterval(interval);
+		delete this._watchers[p];
+		if (this.options.debug) {
+			debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p));
+		}
+		this._fireEvent(p, "delete");
 	}.bind(this), this.options.deleteCheckTimeout);
 };
 
 Watcher.prototype._optionalMD5 = function (fileName, callback) {
-	if (this.options.checkMD5) {
-		md5(fileName, function (err, hash) {
-			if (err) {
-				this.ee.emit("error", err);
-				return callback();
-			}
-			this._md5s[fileName] = hash;
-
-			if (this.options.debug) {
-				debug(chalk.green("MD5") + " for path=" + chalk.yellow(fileName));
-			}
-			callback();
-		}.bind(this));
-	} else {
-		callback();
+	if (!this.options.checkMD5) {
+		return callback();
 	}
+
+	md5(fileName, function (err, hash) {
+		if (err) {
+			this.ee.emit("error", err);
+			return callback();
+		}
+		this._md5s[fileName] = hash;
+
+		if (this.options.debug) {
+			debug(chalk.green("MD5") + " for path=" + chalk.yellow(fileName) + " md5=" + hash);
+		}
+		callback();
+	}.bind(this));
 };
 
 Watcher.prototype._optionalMD5Check = function (fileName, callback) {
-	if (this.options.checkMD5) {
-		md5(fileName, function (err, hash) {
-			if (err) {
-				this.ee.emit("error", err);
-				return callback();
-			}
-
-			if (this.options.debug) {
-				debug(chalk.green("Compare MD5") + " for path=" + chalk.yellow(fileName) + " old=" + this._md5s[fileName] + " new=" + hash);
-			}
-
-			if (this._md5s[fileName] != hash) {
-				this._md5s[fileName] = hash;
-				callback();
-			}
-		}.bind(this));
-	} else {
-		callback();
+	if (!this.options.checkMD5) {
+		return callback();
 	}
+
+	md5(fileName, function (err, hash) {
+		if (err) {
+			this.ee.emit("error", err);
+			return callback();
+		}
+
+		if (this.options.debug) {
+			debug(chalk.green("Compare MD5") + " for path=" + chalk.yellow(fileName) + " old=" + this._md5s[fileName] + " new=" + hash);
+		}
+
+		if (this._md5s[fileName] != hash) {
+			this._md5s[fileName] = hash;
+			callback();
+		}
+	}.bind(this));
+};
+
+Watcher.prototype._optionalMtime = function (fileName, callback) {
+	if (!this.options.checkMtime) {
+		return callback();
+	}
+
+	fs.stat(fileName, function (err, stat) {
+		if (err && err.code != "ENOENT") {
+			this.ee.emit("error", err);
+			return callback();
+		}
+
+		if (!stat) {
+			return callback();
+		}
+
+		var mtime = stat.mtimeMs;
+
+		this._mtimes[fileName] = mtime;
+
+		if (this.options.debug) {
+			debug(chalk.green("Mtime") + " for path=" + chalk.yellow(fileName) + " mtime=" + mtime);
+		}
+
+		callback();
+	}.bind(this));
+};
+
+Watcher.prototype._optionalMtimeCheck = function (fileName, callback) {
+	if (!this.options.checkMtime) {
+		return callback();
+	}
+
+	fs.stat(fileName, function (err, stat) {
+		if (err && err.code != "ENOENT") {
+			this.ee.emit("error", err);
+			return callback();
+		}
+
+		if (!stat) {
+			return callback();
+		}
+
+		var mtime = stat.mtimeMs;
+
+		if (this.options.debug) {
+			debug(chalk.green("Compare mtime") + " for path=" + chalk.yellow(fileName) + " old=" + this._mtimes[fileName] + " new=" + mtime);
+		}
+
+		if (this._mtimes[fileName] != mtime) {
+			this._mtimes[fileName] = mtime;
+			callback();
+		}
+	}.bind(this));
+};
+
+Watcher.prototype._rewatchFile = function (p) {
+	this._watchers[p].close();
+	delete this._watchers[p];
+	if (this.options.debug) {
+		debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p));
+	}
+	this._watchFile(p);
 };
 
 Watcher.prototype._watchFile = function (p) {
@@ -469,30 +529,39 @@ Watcher.prototype._watchFile = function (p) {
 			return;
 		}
 
-		if (action == "rename") {
-			try {
-				var stat = fs.statSync(p);
-			} catch (err) {
-			}
+		if (this.options.debug) {
+			debug(chalk.yellow("Raw event") + " watcher: path=" + chalk.yellow(p) + " action=" + action);
+		}
 
-			if (stat) {
+
+		if (action == "rename") {
+			this._watchers[p].close();
+
+			fs.stat(p, function (err, stat) {
+				if (err && err.code != "ENOENT") {
+					this.ee.emit("error", err);
+				}
+
+				if (stat) {
+					if (this.options.debug) {
+						debug(chalk.red("Replaced") + " watcher: path=" + chalk.yellow(p));
+					}
+
+					this._optionalMtimeCheck(p, function () {
+						this._optionalMD5Check(p, function () {
+							this._rewatchFile(p);
+							this._fireEvent(p, "change");
+						}.bind(this));
+					}.bind(this));
+				} else {
+					this._checkDelete(p);
+				}
+			}.bind(this));
+		} else {
+			this._optionalMtimeCheck(p, function () {
 				this._optionalMD5Check(p, function () {
 					this._fireEvent(p, "change");
 				}.bind(this));
-			} else {
-				this._checkDelete(p);
-			}
-
-			if (this.options.debug) {
-				debug(chalk.red("Deleted") + " watcher: path=" + chalk.yellow(p));
-			}
-
-			this._watchers[p].close();
-			delete this._watchers[p];
-			// try to rewatch
-		} else {
-			this._optionalMD5Check(p, function () {
-				this._fireEvent(p, "change");
 			}.bind(this));
 		}
 	}.bind(this));
@@ -521,8 +590,10 @@ Watcher.prototype._watchDir = function (d) {
 
 			if (stat) {
 				this._fireEvent(filePath, "create");
-				this._optionalMD5(filePath, function () {
-					this._watchFile(filePath);
+				this._optionalMtime(filePath, function () {
+					this._optionalMD5(filePath, function () {
+						this._watchFile(filePath);
+					}.bind(this));
 				}.bind(this));
 			}
 		}
@@ -533,9 +604,13 @@ Watcher.prototype._watchDir = function (d) {
 	}
 };
 
-Watcher.prototype._reglob = function () {
+Watcher.prototype._reglob = function (callback) {
 	if (this._runState !== "running") {
 		return;
+	}
+
+	if (this.options.debug) {
+		debug(chalk.yellow("Reglob"));
 	}
 
 	var paths = sequentialGlob(this.options.globs);
@@ -544,8 +619,10 @@ Watcher.prototype._reglob = function () {
 			return;
 		}
 
-		this._optionalMD5(p, function () {
-			this._watchFile(p);
+		this._optionalMtime(p, function () {
+			this._optionalMD5(p, function () {
+				this._watchFile(p);
+			}.bind(this));
 		}.bind(this));
 
 		if (!this._firstTime) {
@@ -563,6 +640,10 @@ Watcher.prototype._reglob = function () {
 	}.bind(this));
 
 	this._firstTime = false;
+
+	if (callback) {
+		callback();
+	}
 };
 
 Watcher.prototype.stop = function (callback) {

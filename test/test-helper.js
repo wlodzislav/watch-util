@@ -3,6 +3,7 @@ var path = require("path");
 var program = require("commander");
 
 function sendEventSync(event, data) {
+	//console.log({ event, data });
 	data = data || {};
 	data.timestamp = Date.now();
 	try {
@@ -60,22 +61,21 @@ for (var key in data) {
 sendEventSync("run", data);
 
 if (program.stayAlive) {
-	function onSig() {
-		sendEventSync("killed")
-		setTimeout(function () {
-			process.exit(program.exit || 0);
-		}, program.delay || 0);
-	}
-
-	process.on("SIGTERM", onSig);
-	process.on("SIGINT", onSig);
 	setInterval(function () {}, 10000);
 } else {
 	setTimeout(function () {
-		sendEventSync("exit")
+		sendEventSync("exit");
 		process.exit(program.exit || 0);
 	}, program.delay || 0);
 }
+
+function onSig() {
+	sendEventSync("killed")
+	process.exit(program.exit || 0);
+}
+
+process.on("SIGTERM", onSig);
+process.on("SIGINT", onSig);
 
 console.log("OUTPUT");
 console.error("ERROR");

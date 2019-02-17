@@ -3,6 +3,7 @@ var fs = require("fs");
 var path = require("path");
 var EventEmitter = require("events");
 
+var touch = require("touch");
 var rimraf = require("rimraf");
 
 var Watcher = require("../");
@@ -70,7 +71,9 @@ function create(f) {
 	fs.writeFileSync(f, "", "utf8");
 }
 
-var change = create;
+function change(f) {
+	fs.writeFileSync(f, "" + Math.random(), "utf8");
+}
 
 function rm(f) {
 	rimraf.sync(f);
@@ -296,8 +299,8 @@ describe("Watching", function () {
 		w.start(function () {
 			setTimeout(function () {
 				fs.renameSync("temp/a", "temp/b");
-				expectCallback("temp/b", "create", function () {
-					expectCallback("temp/a", "delete", done);
+				expectCallback("temp/a", "delete", function () {
+					expectCallback("temp/b", "create", done);
 				});
 			}, watcherStartDelay);
 		});
@@ -438,7 +441,7 @@ describe("Watching", function () {
 		create("temp/a");
 		w.start(function () {
 			setTimeout(function () {
-				change("temp/a");
+				fs.writeFileSync("temp/a", "", "utf8");
 				expectNoCallback(500, done);
 			}, watcherStartDelay);
 		});
@@ -463,6 +466,54 @@ describe("Watching", function () {
 		w.start(function () {
 			setTimeout(function () {
 				change("temp/a");
+				expectCallback("temp/a", "change", done);
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".checkMtime == true, no change", function (done) {
+		w = new Watcher(["temp/a"], { checkMtime: true }, callback);
+
+		create("temp/a");
+		touch.sync("temp/a"); // node-touch can't set sub-ms mtime on mac, overwrite with rounded ms
+		var stat1 = fs.statSync("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				touch.sync("temp/a");
+				var stat2 = fs.statSync("temp/a");
+				assert.equal(stat2.mtimeMs, stat1.mtimeMs);
+				expectNoCallback(500, done);
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".checkMtime == true, change", function (done) {
+		w = new Watcher(["temp/a"], { checkMtime: true }, callback);
+
+		create("temp/a");
+		touch.sync("temp/a");
+		var start = Date.now();
+		var stat1 = fs.statSync("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				fs.writeFileSync("temp/a", "", "utf8");
+				var stat2 = fs.statSync("temp/a");
+				expectCallback("temp/a", "change", done);
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".checkMtime == false", function (done) {
+		w = new Watcher(["temp/a"], { checkMtime: false }, callback);
+
+		create("temp/a");
+		touch.sync("temp/a");
+		var stat1 = fs.statSync("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				touch.sync("temp/a");
+				var stat2 = fs.statSync("temp/a");
+				assert.equal(stat2.mtimeMs, stat1.mtimeMs);
 				expectCallback("temp/a", "change", done);
 			}, watcherStartDelay);
 		});
@@ -606,7 +657,7 @@ describe("Running", function () {
 	});
 
 	it("kill in .stop + .restartOnError == true, exec", function (done) {
-		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 200"));
+		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 500"));
 
 		create("temp/a");
 		w.start(function () {
@@ -616,7 +667,9 @@ describe("Running", function () {
 					helper.expectEvent("exit", function () {
 						helper.expectEvent("run", function () {
 							w.stop();
-							helper.expectNoEvents(1000, done);
+							helper.expectEvent("killed", function () {
+								helper.expectNoEvents(1000, done);
+							});
 						});
 					});
 				});
@@ -642,12 +695,11 @@ describe("Running", function () {
 	});
 
 	it(".restartOnSuccess == true, restart", function (done) {
-		w = new Watcher(["temp/a"], { restartOnSuccess: true, restart: true }, helper.cmd("--exit 0 --delay 200"));
+		w = new Watcher(["temp/a"], { restartOnSuccess: true, restart: true, }, helper.cmd("--exit 0 --delay 200"));
 
 		create("temp/a");
 		w.start(function () {
 			setTimeout(function () {
-				change("temp/a");
 				helper.expectEvent("run", function () {
 					helper.expectEvent("exit", function () {
 						helper.expectEvent("run", done);
@@ -1036,11 +1088,13 @@ describe("API", function () {
 	it(".on(\"create\")", function (done) {
 		w = new Watcher(["temp/a"]);
 		w.start(function () {
-			create("temp/a");
-			w.once("create", function (filePath) {
-				assert.equal(filePath, "temp/a");
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("create", function (filePath) {
+					assert.equal(filePath, "temp/a");
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1048,11 +1102,13 @@ describe("API", function () {
 		w = new Watcher(["temp/a"]);
 		create("temp/a");
 		w.start(function () {
-			change("temp/a");
-			w.once("change", function (filePath) {
-				assert.equal(filePath, "temp/a");
-				done();
-			});
+			setTimeout(function () {
+				change("temp/a");
+				w.once("change", function (filePath) {
+					assert.equal(filePath, "temp/a");
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1060,65 +1116,73 @@ describe("API", function () {
 		w = new Watcher(["temp/a"]);
 		create("temp/a");
 		w.start(function () {
-			rimraf.sync("temp/a");
-			w.once("delete", function (filePath) {
-				assert.equal(filePath, "temp/a");
-				done();
-			});
+			setTimeout(function () {
+				rimraf.sync("temp/a");
+				w.once("delete", function (filePath) {
+					assert.equal(filePath, "temp/a");
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
 	it(".on(\"all\")", function (done) {
 		w = new Watcher(["temp/a"]);
 		w.start(function () {
-			create("temp/a");
-			w.once("all", function (filePath, action) {
-				assert.equal(filePath, "temp/a");
-				assert.equal(action, "create");
-				change("temp/a");
+			setTimeout(function () {
+				create("temp/a");
 				w.once("all", function (filePath, action) {
 					assert.equal(filePath, "temp/a");
-					assert.equal(action, "change");
-					rimraf.sync("temp/a");
+					assert.equal(action, "create");
+					change("temp/a");
 					w.once("all", function (filePath, action) {
 						assert.equal(filePath, "temp/a");
-						assert.equal(action, "delete");
-						done();
+						assert.equal(action, "change");
+						rimraf.sync("temp/a");
+						w.once("all", function (filePath, action) {
+							assert.equal(filePath, "temp/a");
+							assert.equal(action, "delete");
+							done();
+						});
 					});
 				});
-			});
+			}, watcherStartDelay);
 		});
 	});
 
 	it(".on(\"all\") + .combineEvents = true", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { combineEvents: true, debounce: 500 });
 		w.start(function () {
-			create("temp/a");
-			create("temp/b");
-			w.once("all", function (filePaths) {
-				assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
-				change("temp/a");
-				change("temp/b");
+			setTimeout(function () {
+				create("temp/a");
+				create("temp/b");
 				w.once("all", function (filePaths) {
 					assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
-					rimraf.sync("temp/a");
-					rimraf.sync("temp/b");
+					change("temp/a");
+					change("temp/b");
 					w.once("all", function (filePaths) {
 						assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
-						done();
+						rimraf.sync("temp/a");
+						rimraf.sync("temp/b");
+						w.once("all", function (filePaths) {
+							assert.deepEqual(filePaths, ["temp/a", "temp/b"]);
+							done();
+						});
 					});
 				});
-			});
+			}, watcherStartDelay);
 		});
 	});
 
 	it(".on(\"exec\")", function (done) {
 		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));
 		w.start(function () {
-			create("temp/a");
-			w.once("exec", function () {
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("exec", function () {
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1137,33 +1201,39 @@ describe("API", function () {
 	it(".on(\"restart\")", function (done) {
 		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
 		w.start(function () {
-			create("temp/a");
-			w.once("restart", function () {
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("restart", function () {
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
 	it(".on(\"kill\") + .restart", function (done) {
 		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive wtf"));
 		w.start(function () {
-			create("temp/a");
-			w.once("kill", function () {
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("kill", function () {
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
 	it(".on(\"kill\") + .stop", function (done) {
 		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));
 		w.start(function () {
-			create("temp/a");
-			helper.expectEvent("run", function () {
-				w.stop();
-				w.once("kill", function () {
-					done();
+			setTimeout(function () {
+				create("temp/a");
+				helper.expectEvent("run", function () {
+					w.stop();
+					w.once("kill", function () {
+						done();
+					});
 				});
-			});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1180,10 +1250,12 @@ describe("API", function () {
 	it(".on(\"crash\")", function (done) {
 		w = new Watcher(["temp/a"], helper.cmd("--exit 1"));
 		w.start(function () {
-			create("temp/a");
-			w.on("crash", function () {
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.on("crash", function () {
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1199,10 +1271,12 @@ describe("API", function () {
 	it(".on(\"error\")", function (done) {
 		w = new Watcher(["temp/a"], { shell: false }, "non-existing-cmd");
 		w.start(function () {
-			create("temp/a");
-			w.once("error", function () {
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("error", function () {
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1217,11 +1291,13 @@ describe("API", function () {
 	it(".on(\"exit\") code = 0", function (done) {
 		w = new Watcher(["temp/a"], helper.cmd("--exit 0"));
 		w.start(function () {
-			create("temp/a");
-			w.once("exit", function (code) {
-				assert.equal(code, 0);
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("exit", function (code) {
+					assert.equal(code, 0);
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
@@ -1238,11 +1314,13 @@ describe("API", function () {
 	it(".on(\"exit\") code = 1", function (done) {
 		w = new Watcher(["temp/a"], helper.cmd("--exit 1"));
 		w.start(function () {
-			create("temp/a");
-			w.once("exit", function (code) {
-				assert.equal(code, 1);
-				done();
-			});
+			setTimeout(function () {
+				create("temp/a");
+				w.once("exit", function (code) {
+					assert.equal(code, 1);
+					done();
+				});
+			}, watcherStartDelay);
 		});
 	});
 
