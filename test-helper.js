@@ -31,7 +31,34 @@ program
 
 program.parse(process.argv);
 
-sendEventSync("run");
+var relFiles;
+var files;
+
+var data = {
+	event: program.event,
+	cwd: program.cwd,
+	relFile: program.relFile,
+	file: program.file,
+	relDir: program.relDir,
+	dir: program.dir,
+};
+
+var firstDelimiterIndex = process.argv.indexOf("--");
+if (firstDelimiterIndex != -1) {
+	var secondDelimiterIndex = process.argv.indexOf("--", firstDelimiterIndex + 1);
+	if (secondDelimiterIndex != -1) {
+		data.relFiles = process.argv.slice(firstDelimiterIndex + 1, secondDelimiterIndex);
+		data.files = process.argv.slice(secondDelimiterIndex + 1);
+	}
+}
+
+for (var key in data) {
+	if (data[key] && data[key].startsWith && data[key].startsWith("%") || !data[key]) {
+		delete data[key];
+	}
+}
+
+sendEventSync("run", data);
 
 if (program.stayAlive) {
 	function onSig() {
@@ -45,32 +72,6 @@ if (program.stayAlive) {
 	process.on("SIGINT", onSig);
 	setInterval(function () {}, 10000);
 } else {
-	var relFiles;
-	var files;
-
-	var data = {
-		event: program.event,
-		cwd: program.cwd,
-		relFile: program.relFile,
-		file: program.file,
-		relDir: program.relDir,
-		dir: program.dir,
-	};
-
-	var firstDelimiterIndex = process.argv.indexOf("--");
-	if (firstDelimiterIndex != -1) {
-		var secondDelimiterIndex = process.argv.indexOf("--", firstDelimiterIndex + 1);
-		if (secondDelimiterIndex != -1) {
-			data.relFiles = process.argv.slice(firstDelimiterIndex + 1, secondDelimiterIndex);
-			data.files = process.argv.slice(secondDelimiterIndex + 1);
-		}
-	}
-
-	for (var key in data) {
-		if (data[key] && data[key].startsWith && data[key].startsWith("%") || !data[key]) {
-			delete data[key];
-		}
-	}
 	setTimeout(function () {
 		sendEventSync("exit")
 		process.exit(program.exit || 0);

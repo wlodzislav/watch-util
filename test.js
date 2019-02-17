@@ -303,6 +303,7 @@ describe("Watching", function () {
 			}, watcherStartDelay);
 		});
 	});
+
 	it(".events", function (done) {
 		w = new Watcher(["temp/a"], { events: ["create", "change"] }, callback);
 
@@ -391,10 +392,35 @@ describe("Watching", function () {
 		});
 	});
 
-	it("dont't fire debounced combined callback after .stop()");
-	it("dont't fire debounced separate callback after .stop()");
-	it("dont't fire throttled combined callback after .stop()");
-	it("dont't fire throttled separate callback after .stop()");
+	it("dont't fire debounced combined callback after .stop()", function (done) {
+		w = new Watcher(["temp/a"], { debounce: 1000, combineEvents: true }, callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				setTimeout(function () {
+					w.stop();
+					expectNoCallback(500, done);
+				}, 500);
+			}, watcherStartDelay);
+		});
+	});
+
+	it("dont't fire debounced separate callback after .stop()", function (done) {
+		w = new Watcher(["temp/a"], { debounce: 1000, combineEvents: false }, callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				setTimeout(function () {
+					w.stop();
+					expectNoCallback(500, done);
+				}, 500);
+			}, watcherStartDelay);
+		});
+	});
 
 	it(".reglob", function (done) {
 		w = new Watcher(["temp/a"], { reglob: 10000 }, callback);
@@ -511,8 +537,6 @@ describe("Running", function () {
 			}, watcherStartDelay);
 		});
 	});
-	it("don't restart throttled cmd in .stop()");
-	it("don't restart throttled cmd in .stop() + .combineEvents = true");
 
 	it(".restartOnError == true, exec", function (done) {
 		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 200"));
@@ -810,11 +834,75 @@ describe("Running", function () {
 	});
 
 	it(".shell == true");
+
 	it(".shell == false");
 
 	it("custom .shell");
 
-	it(".throttle");
+	it(".throttle + .combineEvents = true", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { combineEvents: true, throttle: 1000 }, helper.cmd());
+
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a");
+				create("temp/b");
+				helper.expectEvent("run", { relFiles: ["temp/a", "temp/b"]}, function () {
+					var start = Date.now();
+					helper.expectEvent("exit", function () {
+						create("temp/a");
+						create("temp/b");
+						helper.expectEvent("run", { relFiles: ["temp/a", "temp/b"]}, function () {
+							var delay = Date.now() - start;
+							assert(delay >= 900); // 100 ms to start process
+							done();
+						});
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".throttle + .combineEvents = false", function (done) {
+		w = new Watcher(["temp/a", "temp/b"], { combineEvents: false, throttle: 1500, debounce: 0 }, helper.cmd("--delay 1000"));
+
+		w.start(function () {
+			setTimeout(function () {
+				create("temp/a");
+				helper.expectEvent("run", { relFile: "temp/a"}, function () {
+					var start = Date.now();
+					helper.expectEvent("exit", function () {
+						create("temp/b");
+						helper.expectEvent("run", { relFile: "temp/b"}, function () {
+							rimraf.sync("temp/a");
+							helper.expectEvent("run", { relFile: "temp/a"}, function () {
+								var delay = Date.now() - start;
+								assert(delay >= 1400); // 100 ms to start process
+								done();
+							});
+						});
+					});
+				});
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".throttle + .restart = true", function (done) {
+		w = new Watcher(["temp/a"], { restart: true, throttle: 1000 }, helper.cmd("--stay-alive"));
+
+		w.start(function () {
+			helper.expectEvent("run", function () {
+				var start = Date.now();
+				create("temp/a");
+				helper.expectEvent("killed", function () {
+					var delay = Date.now() - start;
+					helper.expectEvent("run", function () {
+						assert(delay >= 900); // 100 ms to start process
+						done();
+					});
+				});
+			});
+		});
+	});
 
 	it(".parallelLimit", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { waitDone: true, combineEvents: false, parallelLimit: 1 }, helper.cmd("--delay 500"));
@@ -944,7 +1032,7 @@ describe("API", function () {
 		});
 	});
 
-	it(".on(\"all\") + .combinedEvents = true", function (done) {
+	it(".on(\"all\") + .combineEvents = true", function (done) {
 		w = new Watcher(["temp/a", "temp/b"], { combineEvents: true, debounce: 500 });
 		w.start(function () {
 			create("temp/a");

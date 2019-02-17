@@ -20,22 +20,29 @@ function debug(message) {
 		+ " " + message);
 }
 
-function debounce(fun, duration) {
+function debounceThrottle(fun, debounceDuration, throttleDuration, last) {
 	var timeout;
-	var context, args;
+	last = last || 0;
+
 	var debouncer = function() {
-		context = this;
-		args = arguments;
+		var context = this;
+		var args = arguments;
+
 		clearTimeout(timeout);
+
+		var left = Math.max(0, throttleDuration - (Date.now() - last));
 		timeout = setTimeout(function () {
+			last = Date.now();
 			fun.apply(context, args);
-		}, duration);
+		}, Math.max(debounceDuration, left));
 	};
+
 	debouncer.cancel = function () {
 		clearTimeout(timeout);
 	};
+
 	return debouncer;
-};
+}
 
 var isShAvailableOnWin = undefined;
 function checkShAvailableOnWin() {
@@ -563,7 +570,8 @@ function Watcher() {
 }
 
 Watcher.prototype.defaultOptions = {
-	debounce: 200, // exec/reload once in ms at max
+	debounce: 200, // exec/reload only after no events for N ms
+	throttle: 0, // exec/reload no more then once every N ms
 	reglob: 50, // perform reglob to watch added files
 	restartOnError: false, // restart if exit code != 0
 	restartOnSuccess: false, // restart if exit code == 0
@@ -705,9 +713,15 @@ Watcher.prototype.start = function (callback) {
 		}
 	}
 
-	if (this._ruleOptions.callback || this.getOption("combineEvents")) {
-		this._callbackCombinedDebounced = debounce(this._callbackCombined.bind(this), this.getOption("debounce"));
+	var last = 0;
+	if (this._ruleOptions.restart) {
+		last = Date.now();
 	}
+
+	if (this._ruleOptions.callback || this.getOption("combineEvents")) {
+		this._callbackCombinedDebounced = debounceThrottle(this._callbackCombined.bind(this), this.getOption("debounce"), this.getOption("throttle"), last);
+	}
+
 
 	this._reglob();
 	this._debouncers = {};
@@ -722,9 +736,14 @@ Watcher.prototype.start = function (callback) {
 };
 
 Watcher.prototype._callbackCombined = function () {
+	if (this._runState != "running") {
+		return;
+	}
+
 	if (this.getOption("debug")) {
 		debug(chalk.green("Call") + " callback for " + chalk.yellow(Object.keys(this._changed).join(", ")));
 	}
+
 	var filePaths = Object.keys(this._changed);
 	if (this._ruleOptions.callback) {
 		this._ruleOptions.callback(filePaths);
@@ -735,9 +754,14 @@ Watcher.prototype._callbackCombined = function () {
 }
 
 Watcher.prototype._callbackSingle = function (filePath, action) {
+	if (this._runState != "running") {
+		return;
+	}
+
 	if (this.getOption("debug")) {
 		debug(chalk.green("Call") + " callback for path=" + chalk.yellow(filePath) + " action=" + action);
 	}
+
 	this._changed[filePath] = null;
 	if (this._ruleOptions.callback) {
 		this._ruleOptions.callback(filePath, action);
@@ -754,6 +778,7 @@ Watcher.prototype._fireEvent = function (filePath, action) {
 	if (this.getOption("debug")) {
 		debug(chalk.green("Fire") + " watcher: path=" + chalk.yellow(filePath) + " action=" + action);
 	}
+
 	var events = this.getOption("events");
 	if (events.indexOf(action) == -1) {
 		return;
@@ -768,12 +793,11 @@ Watcher.prototype._fireEvent = function (filePath, action) {
 			this._callbackCombinedDebounced();
 		} else {
 			if (!this._debouncers[filePath]) {
-				this._debouncers[filePath] = debounce(function () {
-					delete this._debouncers[filePath];
+				this._debouncers[filePath] = debounceThrottle(function (filePath, action) {
 					this._callbackSingle(filePath, action);
-				}.bind(this), this.getOption("debounce"));
+				}.bind(this), this.getOption("debounce"), this.getOption("throttle"));
 			}
-			this._debouncers[filePath]();
+			this._debouncers[filePath](filePath, action);
 		}
 	}
 };
@@ -794,6 +818,9 @@ Watcher.prototype._checkDelete = function (p) {
 
 	var timeout = setTimeout(function () {
 		this._fireEvent(p, "delete");
+		if (!this._ruleOptions.combineEvents) {
+			delete this._debouncers[p];
+		}
 		clearInterval(interval);
 	}.bind(this), this._ruleOptions.deleteCheckTimeout);
 };

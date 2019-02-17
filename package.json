@@ -4,7 +4,7 @@
   "description": "",
   "main": "watcher.js",
   "scripts": {
-    "test": "mocha test.js"
+    "test": "mocha test.js --colors --bail --timeout 5000"
   },
   "author": "Vladislav Kaminsky <wlodzislav@ya.ru>",
   "license": "MIT",
