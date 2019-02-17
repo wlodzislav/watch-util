@@ -432,6 +432,42 @@ describe("Watching", function () {
 			}, watcherStartDelay);
 		});
 	});
+
+	it(".checkMD5 == true, no change", function (done) {
+		w = new Watcher(["temp/a"], { checkMD5: true }, callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				expectNoCallback(500, done);
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".checkMD5 == true, change", function (done) {
+		w = new Watcher(["temp/a"], { checkMD5: true }, callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				fs.writeFileSync("temp/a", "abc", "utf8");
+				expectCallback("temp/a", "change", done);
+			}, watcherStartDelay);
+		});
+	});
+
+	it(".checkMD5 == false", function (done) {
+		w = new Watcher(["temp/a"], { checkMD5: false }, callback);
+
+		create("temp/a");
+		w.start(function () {
+			setTimeout(function () {
+				change("temp/a");
+				expectCallback("temp/a", "change", done);
+			}, watcherStartDelay);
+		});
+	});
 });
 
 describe("Running", function () {
@@ -978,12 +1014,6 @@ describe("Running", function () {
 			}, watcherStartDelay);
 		});
 	});
-
-	it(".checkMtime == true");
-	it(".checkMtime == false");
-
-	it(".checkMD5 == true");
-	it(".checkMD5 == false");
 });
 
 describe("API", function () {

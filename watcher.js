@@ -1,10 +1,11 @@
 var fs = require("fs");
 var path = require("path");
 var stream = require("stream");
-var minimatch = require("minimatch");
+var crypto = require("crypto");
 var childProcess = require("child_process");
 var EventEmitter = require("events");
 
+var minimatch = require("minimatch");
 var glob = require("glob");
 var chalk = require("chalk");
 var async = require("async");
@@ -122,6 +123,21 @@ function globsMatcher(patterns) {
 	return function (f) {
 		return matchers.every(function (m) { return m.match(f); })
 	};
+}
+
+function md5(filePath, callback) {
+	var fd = fs.createReadStream(filePath);
+	var hash = crypto.createHash("md5");
+	hash.setEncoding("hex");
+
+	fd.on("end", function() {
+		hash.end();
+		callback(null, hash.read());
+	});
+
+	fd.on("error", callback);
+
+	fd.pipe(hash);
 }
 
 function AlivePassThrough (options) {
@@ -563,6 +579,7 @@ function Watcher() {
 	this._debouncers = {};
 	this._watchers = {};
 	this._changed = {};
+	this._md5s = {};
 
 	//this._ruleOptions.debug = true;
 	//this._ruleOptions.kill.debug = true;
@@ -577,6 +594,7 @@ Watcher.prototype.defaultOptions = {
 	restartOnSuccess: false, // restart if exit code == 0
 	restart: false, // run as persistent process
 	events: ["create", "change", "delete"],
+	checkMD5: false,
 	combineEvents: false, // true - run separate cmd per changed file, false - run single cmd for all changes, default: false
 	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
 	shell: true, // run in shell or pass custom shell
@@ -813,7 +831,9 @@ Watcher.prototype._checkDelete = function (p) {
 		if (stat) {
 			clearInterval(interval);
 			clearTimeout(timeout);
-			this._fireEvent(p, "change");
+			this._optionalMD5Check(p, function () {
+				this._fireEvent(p, "change");
+			}.bind(this));
 		}
 	}.bind(this), this._ruleOptions.deleteCheckInterval);
 
@@ -824,6 +844,47 @@ Watcher.prototype._checkDelete = function (p) {
 		}
 		clearInterval(interval);
 	}.bind(this), this._ruleOptions.deleteCheckTimeout);
+};
+
+Watcher.prototype._optionalMD5 = function (fileName, callback) {
+	if (this._ruleOptions.checkMD5) {
+		md5(fileName, function (err, hash) {
+			if (err) {
+				this.ee.emit("error", err);
+				return callback();
+			}
+			this._md5s[fileName] = hash;
+
+			if (this.getOption("debug")) {
+				debug(chalk.green("MD5") + " for path=" + chalk.yellow(fileName));
+			}
+			callback();
+		}.bind(this));
+	} else {
+		callback();
+	}
+};
+
+Watcher.prototype._optionalMD5Check = function (fileName, callback) {
+	if (this._ruleOptions.checkMD5) {
+		md5(fileName, function (err, hash) {
+			if (err) {
+				this.ee.emit("error", err);
+				return callback();
+			}
+
+			if (this.getOption("debug")) {
+				debug(chalk.green("Compare MD5") + " for path=" + chalk.yellow(fileName) + " old=" + this._md5s[fileName] + " new=" + hash);
+			}
+
+			if (this._md5s[fileName] != hash) {
+				this._md5s[fileName] = hash;
+				callback();
+			}
+		}.bind(this));
+	} else {
+		callback();
+	}
 };
 
 Watcher.prototype._watchFile = function (p) {
@@ -839,7 +900,9 @@ Watcher.prototype._watchFile = function (p) {
 			}
 
 			if (stat) {
-				this._fireEvent(p, "change");
+				this._optionalMD5Check(p, function () {
+					this._fireEvent(p, "change");
+				}.bind(this));
 			} else {
 				this._checkDelete(p);
 			}
@@ -852,7 +915,9 @@ Watcher.prototype._watchFile = function (p) {
 			delete this._watchers[p];
 			// try to rewatch
 		} else {
-			this._fireEvent(p, "change");
+			this._optionalMD5Check(p, function () {
+				this._fireEvent(p, "change");
+			}.bind(this));
 		}
 	}.bind(this));
 
@@ -880,7 +945,9 @@ Watcher.prototype._watchDir = function (d) {
 
 			if (stat) {
 				this._fireEvent(filePath, "create");
-				this._watchFile(filePath);
+				this._optionalMD5(filePath, function () {
+					this._watchFile(filePath);
+				}.bind(this));
 			}
 		}
 	}.bind(this));
@@ -901,7 +968,9 @@ Watcher.prototype._reglob = function () {
 			return;
 		}
 
-		this._watchFile(p);
+		this._optionalMD5(p, function () {
+			this._watchFile(p);
+		}.bind(this));
 
 		if (!this._firstTime) {
 			this._fireEvent(p, "create");
