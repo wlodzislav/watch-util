@@ -208,8 +208,10 @@ describe("Watching", function () {
 	});
 
 	afterEach(function (done) {
-		rimraf.sync("temp");
-		w.stop(done);
+		w.stop(function () {
+			rimraf.sync("temp");
+			done();
+		});
 	});
 
 	it("negate globs", function (done) {
@@ -1080,8 +1082,8 @@ describe("API", function () {
 	});
 
 	afterEach(function (done) {
-		rimraf.sync("temp");
 		w.stop(function () {
+			rimraf.sync("temp");
 			helper.clean();
 			killBash("test-helper.js");
 			done();
