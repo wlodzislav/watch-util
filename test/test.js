@@ -218,7 +218,8 @@ describe("Watching", function () {
 		create("temp/a");
 		create("temp/b");
 
-		w = watch.exec(["temp/a", "!temp/b"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a", "!temp/b"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -234,7 +235,8 @@ describe("Watching", function () {
 		create("temp/a1");
 		create("temp/a2");
 
-		w = watch.exec(["temp/*", "!temp/a*", "temp/a1"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/*", "!temp/a*", "temp/a1"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a1");
@@ -247,7 +249,8 @@ describe("Watching", function () {
 	});
 
 	it("handle create", function (done) {
-		w = watch.exec(["temp/a"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -259,7 +262,8 @@ describe("Watching", function () {
 	it("watch dirs to handle create", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/*"], { reglob: 10000, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/*"], { reglob: 10000, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/b");
@@ -271,7 +275,8 @@ describe("Watching", function () {
 	it("handle change", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -283,7 +288,8 @@ describe("Watching", function () {
 	it("handle delete", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				rm("temp/a");
@@ -295,7 +301,8 @@ describe("Watching", function () {
 	it("handle delete parent dir", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				rm("temp");
@@ -307,7 +314,8 @@ describe("Watching", function () {
 	it("handle rename", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a", "temp/b"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a", "temp/b"], { combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				fs.renameSync("temp/a", "temp/b");
@@ -319,7 +327,8 @@ describe("Watching", function () {
 	});
 
 	it(".events", function (done) {
-		w = watch.exec(["temp/a"], { events: ["create", "change"], combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { events: ["create", "change"], combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -338,7 +347,8 @@ describe("Watching", function () {
 	it(".combineEvents same file", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { debounce: 1000, combineEvents: true }, callback);
+		w = new watch.Watcher(["temp/a"], { debounce: 1000, combineEvents: true }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -352,7 +362,8 @@ describe("Watching", function () {
 		create("temp/a");
 		create("temp/b");
 
-		w = watch.exec(["temp/a", "temp/b"], { debounce: 1000, combineEvents: true }, callback);
+		w = new watch.Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: true }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -366,7 +377,8 @@ describe("Watching", function () {
 		create("temp/a");
 		create("temp/b");
 
-		w = watch.exec(["temp/a", "temp/b"], { debounce: 1000, combineEvents: true }, callback);
+		w = new watch.Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: true }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -385,7 +397,8 @@ describe("Watching", function () {
 		create("temp/a");
 		create("temp/b");
 
-		w = watch.exec(["temp/a", "temp/b"], { debounce: 1000, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a", "temp/b"], { debounce: 1000, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -408,7 +421,8 @@ describe("Watching", function () {
 	it("dont't fire debounced combined callback after .stop()", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { debounce: 1000, combineEvents: true }, callback);
+		w = new watch.Watcher(["temp/a"], { debounce: 1000, combineEvents: true }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -423,7 +437,8 @@ describe("Watching", function () {
 	it("dont't fire debounced separate callback after .stop()", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { debounce: 1000, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { debounce: 1000, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -436,7 +451,8 @@ describe("Watching", function () {
 	});
 
 	it(".reglob", function (done) {
-		w = watch.exec(["temp/a"], { reglob: 10000, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { reglob: 10000, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -448,7 +464,8 @@ describe("Watching", function () {
 	it(".checkMD5 == true, no change", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { checkMD5: true, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { checkMD5: true, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				fs.writeFileSync("temp/a", "", "utf8");
@@ -460,7 +477,8 @@ describe("Watching", function () {
 	it(".checkMD5 == true, change", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { checkMD5: true, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { checkMD5: true, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				fs.writeFileSync("temp/a", "abc", "utf8");
@@ -472,7 +490,8 @@ describe("Watching", function () {
 	it(".checkMD5 == false", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { checkMD5: false, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { checkMD5: false, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -486,7 +505,8 @@ describe("Watching", function () {
 		touch.sync("temp/a"); // node-touch can't set sub-ms mtime on mac, overwrite with rounded ms
 		var stat1 = fs.statSync("temp/a");
 
-		w = watch.exec(["temp/a"], { checkMtime: true, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { checkMtime: true, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				touch.sync("temp/a");
@@ -503,7 +523,8 @@ describe("Watching", function () {
 		var start = Date.now();
 		var stat1 = fs.statSync("temp/a");
 
-		w = watch.exec(["temp/a"], { checkMtime: true, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { checkMtime: true, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				fs.writeFileSync("temp/a", "", "utf8");
@@ -518,7 +539,8 @@ describe("Watching", function () {
 		touch.sync("temp/a");
 		var stat1 = fs.statSync("temp/a");
 
-		w = watch.exec(["temp/a"], { checkMtime: false, combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a"], { checkMtime: false, combineEvents: false }, callback);
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				touch.sync("temp/a");
@@ -1091,7 +1113,8 @@ describe("API", function () {
 	});
 
 	it(".on(\"create\")", function (done) {
-		w = watch.exec(["temp/a"], { combineEvents: false });
+		w = new watch.Watcher(["temp/a"], { combineEvents: false });
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1106,7 +1129,8 @@ describe("API", function () {
 	it(".on(\"change\")", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { combineEvents: false });
+		w = new watch.Watcher(["temp/a"], { combineEvents: false });
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				change("temp/a");
@@ -1121,7 +1145,8 @@ describe("API", function () {
 	it(".on(\"delete\")", function (done) {
 		create("temp/a");
 
-		w = watch.exec(["temp/a"], { combineEvents: false });
+		w = new watch.Watcher(["temp/a"], { combineEvents: false });
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				rimraf.sync("temp/a");
@@ -1134,7 +1159,8 @@ describe("API", function () {
 	});
 
 	it(".on(\"all\")", function (done) {
-		w = watch.exec(["temp/a"], { combineEvents: false });
+		w = new watch.Watcher(["temp/a"], { combineEvents: false });
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1158,7 +1184,8 @@ describe("API", function () {
 	});
 
 	it(".on(\"all\") + .combineEvents = true", function (done) {
-		w = watch.exec(["temp/a", "temp/b"], { combineEvents: true, debounce: 500 });
+		w = new watch.Watcher(["temp/a", "temp/b"], { combineEvents: true, debounce: 500 });
+		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
