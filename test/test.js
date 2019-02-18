@@ -952,7 +952,7 @@ describe("Running", function () {
 	});
 
 	it("custom .shell", function (done) {
-		w = watch.exec(["temp/a"], { shell: "node -e", stdio: [null, "pipe", "pipe"], combineEvents: false }, "console.log(123)");
+		w = watch.exec(["temp/a"], { shell: "node", stdio: [null, "pipe", "pipe"], combineEvents: false }, "console.log(123)");
 		w.once("start", function () {
 			setTimeout(function () {
 				create("temp/a");
