@@ -215,16 +215,16 @@ describe("Watching", function () {
 	});
 
 	it("negate globs", function (done) {
-		create("temp/a");
-		create("temp/b");
+		create("temp/a1");
+		create("temp/a2");
 
-		w = new watch.Watcher(["temp/a", "!temp/b"], { combineEvents: false }, callback);
+		w = new watch.Watcher(["temp/a*", "!temp/a1"], { combineEvents: false }, callback);
 		w.start();
 		w.once("start", function () {
 			setTimeout(function () {
-				change("temp/a");
-				change("temp/b");
-				expectCallback("temp/a", "change", function () {
+				change("temp/a1");
+				change("temp/a2");
+				expectCallback("temp/a2", "change", function () {
 					expectNoCallback(500, done);
 				});
 			}, watcherStartDelay);
