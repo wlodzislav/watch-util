@@ -28,8 +28,14 @@ function expectCallback() {
 		var event = arguments[1];
 		var callback = arguments[2];
 		_callback = function (f, e) {
-			assert.equal(f, filePath);
-			assert.equal(e, event);
+			try {
+				assert.equal(f, filePath);
+				assert.equal(e, event);
+			} catch (err) {
+				console.error("Got callback arguments");
+				console.dir(arguments);
+				throw err;
+			}
 			_callback = null;
 			callback();
 		}
@@ -110,8 +116,14 @@ CMDHelper.prototype.expectEvent = function () {
 		for (var key in options) {
 			copy[key] = e.data[key];
 		}
-		assert.deepEqual(e.event, event);
-		assert.deepEqual(copy, options);
+		try {
+			assert.deepEqual(e.event, event);
+			assert.deepEqual(copy, options);
+		} catch (err) {
+			console.error("Got event");
+			console.dir(e);
+			throw err;
+		}
 		this._callback = null;
 		callback();
 	}.bind(this);
@@ -151,7 +163,6 @@ CMDHelper.prototype.start = function () {
 				if (entry.event == "crash") {
 					throw new Error("Helper crashed");
 				}
-				//console.log(entry);
 				this._nextLogLineIndex += 1;
 				if (this._callback) {
 					this._callback(entry);
@@ -202,7 +213,7 @@ describe("Watching", function () {
 	});
 
 	it("negate globs", function (done) {
-		w = new Watcher(["temp/a", "!temp/b"], callback);
+		w = new Watcher(["temp/a", "!temp/b"], { combineEvents: false }, callback);
 
 		create("temp/a");
 		create("temp/b");
@@ -218,7 +229,7 @@ describe("Watching", function () {
 	});
 
 	it("globs apply sequentially", function (done) {
-		w = new Watcher(["temp/*", "!temp/a*", "temp/a1"], callback);
+		w = new Watcher(["temp/*", "!temp/a*", "temp/a1"], { combineEvents: false }, callback);
 
 		create("temp/a1");
 		create("temp/a2");
@@ -234,7 +245,7 @@ describe("Watching", function () {
 	});
 
 	it("handle create", function (done) {
-		w = new Watcher(["temp/a"], callback);
+		w = new Watcher(["temp/a"], { combineEvents: false }, callback);
 
 		w.start(function () {
 			setTimeout(function () {
@@ -245,7 +256,7 @@ describe("Watching", function () {
 	});
 
 	it("watch dirs to handle create", function (done) {
-		w = new Watcher(["temp/*"], { reglob: 10000 }, callback);
+		w = new Watcher(["temp/*"], { reglob: 10000, combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -257,7 +268,7 @@ describe("Watching", function () {
 	});
 
 	it("handle change", function (done) {
-		w = new Watcher(["temp/a"], callback);
+		w = new Watcher(["temp/a"], { combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -269,7 +280,7 @@ describe("Watching", function () {
 	});
 
 	it("handle delete", function (done) {
-		w = new Watcher(["temp/a"], callback);
+		w = new Watcher(["temp/a"], { combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -281,7 +292,7 @@ describe("Watching", function () {
 	});
 
 	it("handle delete parent dir", function (done) {
-		w = new Watcher(["temp/a"], callback);
+		w = new Watcher(["temp/a"], { combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -293,7 +304,7 @@ describe("Watching", function () {
 	});
 
 	it("handle rename", function (done) {
-		w = new Watcher(["temp/a", "temp/b"], callback);
+		w = new Watcher(["temp/a", "temp/b"], { combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -307,7 +318,7 @@ describe("Watching", function () {
 	});
 
 	it(".events", function (done) {
-		w = new Watcher(["temp/a"], { events: ["create", "change"] }, callback);
+		w = new Watcher(["temp/a"], { events: ["create", "change"], combineEvents: false }, callback);
 
 		w.start(function () {
 			setTimeout(function () {
@@ -425,7 +436,7 @@ describe("Watching", function () {
 	});
 
 	it(".reglob", function (done) {
-		w = new Watcher(["temp/a"], { reglob: 10000 }, callback);
+		w = new Watcher(["temp/a"], { reglob: 10000, combineEvents: false }, callback);
 
 		w.start(function () {
 			setTimeout(function () {
@@ -436,7 +447,7 @@ describe("Watching", function () {
 	});
 
 	it(".checkMD5 == true, no change", function (done) {
-		w = new Watcher(["temp/a"], { checkMD5: true }, callback);
+		w = new Watcher(["temp/a"], { checkMD5: true, combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -448,7 +459,7 @@ describe("Watching", function () {
 	});
 
 	it(".checkMD5 == true, change", function (done) {
-		w = new Watcher(["temp/a"], { checkMD5: true }, callback);
+		w = new Watcher(["temp/a"], { checkMD5: true, combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -460,7 +471,7 @@ describe("Watching", function () {
 	});
 
 	it(".checkMD5 == false", function (done) {
-		w = new Watcher(["temp/a"], { checkMD5: false }, callback);
+		w = new Watcher(["temp/a"], { checkMD5: false, combineEvents: false }, callback);
 
 		create("temp/a");
 		w.start(function () {
@@ -472,7 +483,7 @@ describe("Watching", function () {
 	});
 
 	it(".checkMtime == true, no change", function (done) {
-		w = new Watcher(["temp/a"], { checkMtime: true }, callback);
+		w = new Watcher(["temp/a"], { checkMtime: true, combineEvents: false }, callback);
 
 		create("temp/a");
 		touch.sync("temp/a"); // node-touch can't set sub-ms mtime on mac, overwrite with rounded ms
@@ -488,7 +499,7 @@ describe("Watching", function () {
 	});
 
 	it(".checkMtime == true, change", function (done) {
-		w = new Watcher(["temp/a"], { checkMtime: true }, callback);
+		w = new Watcher(["temp/a"], { checkMtime: true, combineEvents: false }, callback);
 
 		create("temp/a");
 		touch.sync("temp/a");
@@ -504,7 +515,7 @@ describe("Watching", function () {
 	});
 
 	it(".checkMtime == false", function (done) {
-		w = new Watcher(["temp/a"], { checkMtime: false }, callback);
+		w = new Watcher(["temp/a"], { checkMtime: false, combineEvents: false }, callback);
 
 		create("temp/a");
 		touch.sync("temp/a");
@@ -539,7 +550,7 @@ describe("Running", function () {
 	});
 
 	it("run cmd", function (done) {
-		w = new Watcher(["temp/a"], helper.cmd());
+		w = new Watcher(["temp/a"], { combineEvents: false }, helper.cmd());
 
 		create("temp/a");
 		w.start(function () {
@@ -625,7 +636,7 @@ describe("Running", function () {
 	});
 
 	it(".restartOnError == true, exec", function (done) {
-		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 200"));
+		w = new Watcher(["temp/a"], { restartOnError: true, combineEvents: false }, helper.cmd("--exit 1 --delay 200"));
 
 		create("temp/a");
 		w.start(function () {
@@ -657,7 +668,7 @@ describe("Running", function () {
 	});
 
 	it("kill in .stop + .restartOnError == true, exec", function (done) {
-		w = new Watcher(["temp/a"], { restartOnError: true }, helper.cmd("--exit 1 --delay 500"));
+		w = new Watcher(["temp/a"], { restartOnError: true, combineEvents: false }, helper.cmd("--exit 1 --delay 500"));
 
 		create("temp/a");
 		w.start(function () {
@@ -679,7 +690,7 @@ describe("Running", function () {
 
 
 	it(".restartOnError == false, exec", function (done) {
-		w = new Watcher(["temp/a"], { restartOnError: false }, helper.cmd("--exit 1"));
+		w = new Watcher(["temp/a"], { restartOnError: false, combineEvents: false }, helper.cmd("--exit 1"));
 
 		create("temp/a");
 		w.start(function () {
@@ -695,7 +706,7 @@ describe("Running", function () {
 	});
 
 	it(".restartOnSuccess == true, restart", function (done) {
-		w = new Watcher(["temp/a"], { restartOnSuccess: true, restart: true, }, helper.cmd("--exit 0 --delay 200"));
+		w = new Watcher(["temp/a"], { restartOnSuccess: true, restart: true, combineEvents: false }, helper.cmd("--exit 0 --delay 200"));
 
 		create("temp/a");
 		w.start(function () {
@@ -710,7 +721,7 @@ describe("Running", function () {
 	});
 
 	it(".restartOnSuccess == false, restart", function (done) {
-		w = new Watcher(["temp/a"], { restartOnSuccess: false, restart: true }, helper.cmd("--exit 0"));
+		w = new Watcher(["temp/a"], { restartOnSuccess: false, restart: true, combineEvents: false }, helper.cmd("--exit 0"));
 
 		w.start(function () {
 			setTimeout(function () {
@@ -724,7 +735,7 @@ describe("Running", function () {
 	});
 
 	it(".restart == true starting", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--stay-alive"));
 
 		w.start(function () {
 			helper.expectEvent("run", done);
@@ -732,7 +743,7 @@ describe("Running", function () {
 	});
 
 	it(".restart == true restart on event", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--stay-alive"));
 
 		create("temp/a");
 		w.start(function () {
@@ -750,7 +761,7 @@ describe("Running", function () {
 	});
 
 	it(".restart == false", function (done) {
-		w = new Watcher(["temp/a"], { restart: false }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: false, combineEvents: false }, helper.cmd("--stay-alive"));
 
 		w.start(function () {
 			helper.expectNoEvents(500, done);
@@ -921,7 +932,7 @@ describe("Running", function () {
 	});
 
 	it(".shell == true", function (done) {
-		w = new Watcher(["temp/a"], { shell: true }, "VAR=1; echo $VAR");
+		w = new Watcher(["temp/a"], { shell: true, combineEvents: false }, "VAR=1; echo $VAR");
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -933,7 +944,7 @@ describe("Running", function () {
 	});
 
 	it(".shell == false", function (done) {
-		w = new Watcher(["temp/a"], { shell: false }, "VAR=1; echo $VAR");
+		w = new Watcher(["temp/a"], { shell: false, combineEvents: false }, "VAR=1; echo $VAR");
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -945,7 +956,7 @@ describe("Running", function () {
 	});
 
 	it("custom .shell", function (done) {
-		w = new Watcher(["temp/a"], { shell: "node -e", stdio: [null, "pipe", "pipe"] }, "console.log(123)");
+		w = new Watcher(["temp/a"], { shell: "node -e", stdio: [null, "pipe", "pipe"], combineEvents: false }, "console.log(123)");
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1005,7 +1016,7 @@ describe("Running", function () {
 	});
 
 	it(".throttle + .restart = true", function (done) {
-		w = new Watcher(["temp/a"], { restart: true, throttle: 1000 }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: true, throttle: 1000, combineEvents: false }, helper.cmd("--stay-alive"));
 
 		w.start(function () {
 			helper.expectEvent("run", function () {
@@ -1043,7 +1054,7 @@ describe("Running", function () {
 	});
 
 	it(".stdio pipe", function (done) {
-		w = new Watcher(["temp/a"], { stdio: [null, "pipe", "pipe"] }, helper.cmd());
+		w = new Watcher(["temp/a"], { stdio: [null, "pipe", "pipe"], combineEvents: false }, helper.cmd());
 		create("temp/a");
 		w.start(function () {
 			setTimeout(function () {
@@ -1086,7 +1097,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"create\")", function (done) {
-		w = new Watcher(["temp/a"]);
+		w = new Watcher(["temp/a"], { combineEvents: false });
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1099,7 +1110,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"change\")", function (done) {
-		w = new Watcher(["temp/a"]);
+		w = new Watcher(["temp/a"], { combineEvents: false });
 		create("temp/a");
 		w.start(function () {
 			setTimeout(function () {
@@ -1113,7 +1124,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"delete\")", function (done) {
-		w = new Watcher(["temp/a"]);
+		w = new Watcher(["temp/a"], { combineEvents: false });
 		create("temp/a");
 		w.start(function () {
 			setTimeout(function () {
@@ -1127,7 +1138,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"all\")", function (done) {
-		w = new Watcher(["temp/a"]);
+		w = new Watcher(["temp/a"], { combineEvents: false });
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1175,7 +1186,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"exec\")", function (done) {
-		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { combineEvents: false }, helper.cmd("--stay-alive"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1187,7 +1198,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"exec\") + .restart", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--stay-alive"));
 		w.once("exec", function () {
 			w.once("exec", function () {
 				done();
@@ -1199,7 +1210,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"restart\")", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--stay-alive"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1211,7 +1222,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"kill\") + .restart", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive wtf"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--stay-alive wtf"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1223,7 +1234,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"kill\") + .stop", function (done) {
-		w = new Watcher(["temp/a"], helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { combineEvents: false }, helper.cmd("--stay-alive"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1238,7 +1249,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"kill\") + .stop + .restart", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--stay-alive"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--stay-alive"));
 		w.start(function () {
 			w.stop();
 			w.once("kill", function () {
@@ -1248,7 +1259,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"crash\")", function (done) {
-		w = new Watcher(["temp/a"], helper.cmd("--exit 1"));
+		w = new Watcher(["temp/a"], { combineEvents: false }, helper.cmd("--exit 1"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1260,7 +1271,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"crash\") + .restart", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--exit 1 --delay 500"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--exit 1 --delay 500"));
 		w.start(function () {
 			w.once("crash", function () {
 				done();
@@ -1269,7 +1280,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"error\")", function (done) {
-		w = new Watcher(["temp/a"], { shell: false }, "non-existing-cmd");
+		w = new Watcher(["temp/a"], { shell: false, combineEvents: false }, "non-existing-cmd");
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1281,7 +1292,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"error\") + restart", function (done) {
-		w = new Watcher(["temp/a"], { shell: false, restart: true }, "non-existing-cmd");
+		w = new Watcher(["temp/a"], { shell: false, restart: true, combineEvents: false }, "non-existing-cmd");
 		w.start();
 		w.once("error", function () {
 			done();
@@ -1289,7 +1300,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"exit\") code = 0", function (done) {
-		w = new Watcher(["temp/a"], helper.cmd("--exit 0"));
+		w = new Watcher(["temp/a"], { combineEvents: false }, helper.cmd("--exit 0"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1302,7 +1313,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"exit\") code = 0 + .restart", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--exit 0 --delay 500"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--exit 0 --delay 500"));
 		w.start(function () {
 			w.once("exit", function (code) {
 				assert.equal(code, 0);
@@ -1312,7 +1323,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"exit\") code = 1", function (done) {
-		w = new Watcher(["temp/a"], helper.cmd("--exit 1"));
+		w = new Watcher(["temp/a"], { combineEvents: false }, helper.cmd("--exit 1"));
 		w.start(function () {
 			setTimeout(function () {
 				create("temp/a");
@@ -1325,7 +1336,7 @@ describe("API", function () {
 	});
 
 	it(".on(\"exit\") code = 1 + .restart", function (done) {
-		w = new Watcher(["temp/a"], { restart: true }, helper.cmd("--exit 1 --delay 500"));
+		w = new Watcher(["temp/a"], { restart: true, combineEvents: false }, helper.cmd("--exit 1 --delay 500"));
 		w.start(function () {
 			w.once("exit", function (code) {
 				assert.equal(code, 1);

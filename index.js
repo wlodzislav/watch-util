@@ -146,6 +146,8 @@ function Watcher() {
 	this.options.cmd = cmd;
 	this.options.callback = callback;
 
+	this.options.kill = Object.assign({}, this.defaults.kill, options.kill || {});
+
 	if (this.options.restart) {
 		this.options.combineEvents = true;
 		if (!options.hasOwnProperty("restartOnError")) {
@@ -187,7 +189,7 @@ Watcher.prototype.defaults = {
 	restartOnSuccess: false, // restart if exit code == 0
 	restart: false, // run as persistent process
 	events: ["create", "change", "delete"],
-	combineEvents: false, // run single cmd for all changes or separate
+	combineEvents: true, // run single cmd for all changes or separate
 	checkMD5: false,
 	checkMtime: true, // check modified time before firing events, to handle 2 stage save in editors
 	deleteCheckInterval: 25, // check if file reappeared
@@ -195,7 +197,9 @@ Watcher.prototype.defaults = {
 	parallelLimit: 4, // max parallel running cmds in combineEvents == true mode
 	shell: true, // run in shell or pass custom shell
 	stdio: [null, "ignore", "ignore"],
-	kill: {},
+	kill: {
+		signal: ["SIGTERM", "SIGTERM", "SIGKILL"]
+	},
 	debug: false, // debug logging
 };
 
@@ -396,9 +400,9 @@ Watcher.prototype._checkDelete = function (p) {
 		if (stat) {
 			clearInterval(interval);
 			clearTimeout(timeout);
+			this._rewatchFile(p);
 			this._optionalMtimeCheck(p, function () {
 				this._optionalMD5Check(p, function () {
-					this._rewatchFile(p);
 					this._fireEvent(p, "change");
 				}.bind(this));
 			}.bind(this));
@@ -547,9 +551,9 @@ Watcher.prototype._watchFile = function (p) {
 						debug(chalk.red("Replaced") + " watcher: path=" + chalk.yellow(p));
 					}
 
+					this._rewatchFile(p);
 					this._optionalMtimeCheck(p, function () {
 						this._optionalMD5Check(p, function () {
-							this._rewatchFile(p);
 							this._fireEvent(p, "change");
 						}.bind(this));
 					}.bind(this));

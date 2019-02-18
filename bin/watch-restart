@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+
+var program = require("commander");
+var Watcher = require("../");
+
+function commaSeparated(str) {
+	return str
+		.split(",")
+		.map(function (s) { return s.trim(); })
+		.filter(Boolean);
+}
+
+program
+	.usage("--glob <globs> [options] -- <shell cmd>\n\n    Run and restart cmd on globbed files changes")
+	.option("-g, --globs <patterns>", "Glob patterns to watch, separated by comma, to ignore pattern start it with '!'")
+	.option("--events <events>", "Restart only for specified events, separated by comma, possible values: create, change, delete")
+	.option("-d, --debounce <ms>", "Restart cmd only after no events for N ms")
+	.option("-t, --throttle <ms>", "Restart cmd no more then once in N ms")
+	.option("--reglob <ms>", "Glob files every N ms to track added files/dirs")
+	.option("--check-md5", "Check md5 checksum of files and fire events only if checksum is changed")
+	.option("--no-check-mtime", "Don't check mtime of files and fire events only if mtime is changed")
+	.option("--no-restart-on-error", "Don't restart cmd if cmd crashed or exited with non 0 code")
+	.option("--no-restart-on-success", "Don't restart cmd if cmd exited with 0 code")
+	// order of --shell and --no-shell determines default value of .shell
+	.option("--shell <shell cmd>", "Custom shell to use for running cmd")
+	.option("--no-shell", "Run directly without shell")
+	.option("--kill-signal <signals>", "Signal to send to child when process.kill(pid, signal), separated by comma")
+	.option("--kill-timeout <ms>", "After which return with error")
+	.option("--kill-retry-interval <intervals>", "Intervals between sending of kill signal, separated by comma")
+	.option("--kill-retry-count <n>", "Number of retries")
+	.option("--kill-check-interval <ms>", "Interval between checks if process is dead")
+	.option("--kill-use-pgid", "Use PGID to get all children on mac/linux")
+	.option("--kill-children-immediately", "Kill children immediately, don't wait for parent to die")
+	.option("--silent", "No output from running cmd")
+	.option("--debug", "Debug output")
+
+program.on("--help", function(){
+	console.log();
+	console.log("Globs:\n");
+	console.log("    To ignore specific pattern prefix it with '!'");
+	console.log("    To ignore directory with everything within it end pattern with '/' or '/**'");
+	console.log("    Patterns are applied sequentially to allow for globs like:");
+	console.log("        **/*.js,!test/,test/test.js");
+	console.log("    For more info about glob syntax see: https://github.com/isaacs/node-glob");
+	console.log();
+	console.log("Examples:\n");
+	console.log("    $ watch-restart -g '**/*.js,!node_modules/' node server.js");
+	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --debounce 500 --throttle 2000 node server.js");
+	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --check-md5 --kill-signal 'SIGTERM,SIGKILL' node server.js");
+	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --shell node 'console.log(\"run\"); setInterval(()=>{}, 1000)'");
+	process.exit(0);
+});
+
+program.parse(process.argv);
+
+if (!program.globs) {
+	console.error("Option -g, --globs <patterns> is required");
+	process.exit(1);
+}
+
+var options = {};
+
+["globs", "events"].forEach(function (opt) {
+	if (program[opt]) {
+		options[opt] = commaSeparated(program[opt]);
+	}
+});
+
+["debounce", "throttle", "reglob", "parallelLimit"].forEach(function (opt, index) {
+	if (opt in program) {
+		if (program[opt] != String(Math.round(Number(program[opt])))) {
+			var longFlag = "--" + opt.replace(/([A-Z])/g, "-$1").toLowerCase();
+			var flags = program.options.find(function (o) { return o.flags.indexOf(longFlag) != -1; }).flags;
+			console.error("Option " + flags + " should be integer");
+			process.exit(1);
+		}
+		options[opt] = +program[opt];
+	}
+});
+
+if ("checkMd5" in program) {
+	options.checkMD5 = program.checkMd5;
+}
+
+["checkMtime", "waitDone", "restartOnError", "restartOnSuccess", "shell", "silent", "debug"].forEach(function (opt) {
+	if (opt in program) {
+		options[opt] = program[opt];
+	}
+});
+
+if (program.killSignal) {
+	if (!options.kill) {
+		options.kill = {};
+	}
+	options.kill.signal = commaSeparated(program.killSignal);
+}
+
+if (program.killRetryInterval) {
+	if (!options.kill) {
+		options.kill = {};
+	}
+	var intervals = commaSeparated(program.killRetryInterval)
+	if (!intervals.every(function (i) { return i == ("" + parseInt(i)); })) {
+		console.error("Option --kill-retry-interval <intervals> should be comma separated integers");
+		process.exit(1);
+	}
+
+	options.kill.retryInterval = intervals.map(Number);
+}
+
+["killTimeout", "killRetryCount", "killCheckInterval"].forEach(function (opt) {
+	if (opt in program) {
+		if (!options.kill) {
+			options.kill = {};
+		}
+		if (program[opt] != ("" + parseInt(program[opt]))) {
+			var longFlag = "--" + opt.replace(/([A-Z])/g, "-$1").toLowerCase();
+			var flags = program.options.find(function (o) { return o.flags.indexOf(longFlag) != -1; }).flags;
+			console.error("Option " + flags + " should be integer");
+			process.exit(1);
+		}
+		var replaced = opt.replace(/^kill/, "");
+		var killOpt = replaced[0].toLowerCase() + replaced.substr(1);
+		options.kill[killOpt] = +program[opt];
+	}
+});
+
+if ("killUsePgid" in program) {
+	if (!options.kill) {
+		options.kill = {};
+	}
+	options.kill.usePGID = program.killUsePgid;
+}
+
+if ("killChildrenImmediately" in program) {
+	if (!options.kill) {
+		options.kill = {};
+	}
+	options.kill.killChildrenImmediately = program.killChildrenImmediately;
+}
+
+if (program.silent) {
+	options.stdio = ["ignore", "ignore", "ignore"];
+} else {
+	options.stdio = ["ignore", "inherit", "inherit"];
+}
+
+options.restart = true;
+
+var watcher = new Watcher(options, program.args.join(" "));
+watcher.start()
+
