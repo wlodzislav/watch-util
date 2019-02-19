@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 var program = require("commander");
+var chalk = require("chalk");
+
 var watch = require("../");
 
 function commaSeparated(str) {
@@ -32,6 +34,8 @@ program
 	.option("--kill-use-pgid", "Use PGID to get all children on mac/linux")
 	.option("--kill-children-immediately", "Kill children immediately, don't wait for parent to die")
 	.option("--silent", "No output from running cmd")
+	.option("-v, --verbose", "Log when files are changed and cmd is restarted")
+	.option("-V, --version", "Output version")
 	.option("--debug", "Debug output")
 
 program.on("--help", function(){
@@ -52,6 +56,11 @@ program.on("--help", function(){
 });
 
 program.parse(process.argv);
+
+if (typeof(program.version) != "function") {
+	console.log(require("../package.json").version);
+	process.exit(0);
+}
 
 if (!program.globs) {
 	console.error("Option -g, --globs <patterns> is required");
@@ -153,7 +162,21 @@ options.restart = true;
 
 var w = watch.restart(options.globs, options, program.args.join(" "));
 
+if (program.verbose) {
+	w.on("all", function (f) {
+		console.log(chalk.green("Restart cmd") + " paths=" + chalk.yellow(f.join(", ")));
+	});
+}
+
 w.on("error", function (err) {
 	console.error(err);
 });
 
+function onSig() {
+	w.stop(function () {
+		process.exit();
+	});
+}
+
+process.on("SIGINT", onSig);
+process.on("SIGTERM", onSig);
