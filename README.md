@@ -1,6 +1,6 @@
 # Versatile watcher lib and shell commands for watching files, running and restarting shell commands
 
-Watching files, run and restart shell commands on changes.
+Watch files, run and restart shell commands on changes.
 
 Provides both API and shell commands with consistent options naming.
 
