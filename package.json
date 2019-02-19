@@ -3,6 +3,17 @@
   "version": "1.0.0",
   "description": "Versatile watcher lib and shell commands for watching files, running and restarting shell commands",
   "keywords": [
+    "watch",
+    "watcher",
+    "glob",
+    "md5",
+    "queue",
+    "parallel",
+    "exec",
+    "restart",
+    "shell",
+    "fs",
+    "kill"
   ],
   "main": "index.js",
   "bin": {
@@ -15,7 +26,7 @@
   "author": "Vladislav Kaminsky <wlodzislav@ya.ru>",
   "license": "MIT",
   "devDependencies": {
-    "mocha": "^3.2.0",
+    "mocha": "^6.0.0",
     "rimraf": "^2.6.3",
     "touch": "^3.1.0"
   },
