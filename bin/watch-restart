@@ -50,7 +50,7 @@ program.on("--help", function(){
 	console.log("Examples:\n");
 	console.log("    $ watch-restart -g '**/*.js,!node_modules/' node server.js");
 	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --debounce 500 --throttle 2000 node server.js");
-	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --check-md5 --kill-signal 'SIGTERM,SIGKILL' node server.js");
+	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --check-md5 --kill-signal 'SIGTERM,SIGTERM,SIGKILL' --kill-retry-interval '100,200,500' -- node server.js");
 	console.log("    $ watch-restart -g '**/*.js,!node_modules/' --shell node 'console.log(\"run\"); setInterval(()=>{}, 1000)'");
 	process.exit(0);
 });

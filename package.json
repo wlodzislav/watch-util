@@ -1,7 +1,9 @@
 {
   "name": "watch-util",
-  "version": "0.0.0",
-  "description": "",
+  "version": "1.0.0",
+  "description": "Versatile watcher lib and shell commands for watching files, running and restarting shell commands",
+  "keywords": [
+  ],
   "main": "index.js",
   "bin": {
     "watch-exec": "bin/watch-exec",
