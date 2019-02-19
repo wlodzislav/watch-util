@@ -1,6 +1,6 @@
 {
   "name": "watch-util",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Versatile watcher lib and shell commands for watching files, running and restarting shell commands",
   "keywords": [
     "watch",
@@ -23,6 +23,7 @@
   "scripts": {
     "test": "mocha test/test.js --colors --bail --timeout 5000"
   },
+  "repository": "git://github.com/wlodzislav/watch-util.git",
   "author": "Vladislav Kaminsky <wlodzislav@ya.ru>",
   "license": "MIT",
   "devDependencies": {
