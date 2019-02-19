@@ -106,7 +106,6 @@ watcher.exec = function (globs) {
 	var watcherOptions = applyDefaults(options, execWatcherDefaults);
 	var runnerOptions = applyDefaults(options, execRunnerDefaults);
 	runnerOptions.kill = Object.assign({}, killDefaults, options.kill);
-	//console.log({watcherOptions, runnerOptions});
 
 	var _callback;
 	if (cmd) {
@@ -244,7 +243,6 @@ watcher.restart = function (globs) {
 	var watcherOptions = applyDefaults(options, restartWatcherDefaults);
 	var runnerOptions = applyDefaults(options, restartRunnerDefaults);
 	runnerOptions.kill = Object.assign({}, killDefaults, options.kill);
-	//console.log({watcherOptions, runnerOptions});
 
 	watcherOptions.callOnStart = true;
 	watcherOptions.combineEvents = true;

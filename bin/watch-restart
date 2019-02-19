@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 var program = require("commander");
-var Watcher = require("../");
+var watch = require("../");
 
 function commaSeparated(str) {
 	return str
@@ -140,6 +140,10 @@ if ("killChildrenImmediately" in program) {
 }
 
 if (program.silent) {
+	console.log = function () {};
+	console.info = function () {};
+	console.warn = function () {};
+	console.error = function () {};
 	options.stdio = ["ignore", "ignore", "ignore"];
 } else {
 	options.stdio = ["ignore", "inherit", "inherit"];
@@ -147,6 +151,9 @@ if (program.silent) {
 
 options.restart = true;
 
-var watcher = new Watcher(options, program.args.join(" "));
-watcher.start()
+var w = watch.restart(options.globs, options, program.args.join(" "));
+
+w.on("error", function (err) {
+	console.error(err);
+});
 
