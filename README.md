@@ -46,6 +46,10 @@ watch-exec -g '**/*.js, !node_modules/' -C -- echo event=%event relFile=%relFile
 watch-restart -g '**/*.js,!node_modules/' --check-md5 -- node server.js
 ```
 
+Install:
+
+	npm install watch-util
+
 API:
 
 * [watch.Watcher](#watch.Watcher) - watch files and execute callback when files are changed or listen to events

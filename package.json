@@ -1,6 +1,6 @@
 {
   "name": "watch-util",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Versatile watcher lib and shell commands for watching files, running and restarting shell commands",
   "keywords": [
     "watch",
