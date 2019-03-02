@@ -35,7 +35,7 @@ w.stderr.on("data", function (data) { /* ... */ });
 // or run server/daemon-like cmd
 
 var options = { throttle: 1000, stdio: [null, "inherit", "inherit"] };
-var w = watch.exec(["**/*", "!node_modules/"], options, "node server.js");
+var w = watch.restart(["**/*", "!node_modules/"], options, "node server.js");
 
 ```
 
