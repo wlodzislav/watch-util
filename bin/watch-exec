@@ -165,7 +165,7 @@ if (program.silent) {
 	console.error = function () {};
 	options.stdio = ["ignore", "ignore", "ignore"];
 } else {
-	options.stdio = ["ignore", "inherit", "inherit"];
+	options.stdio = ["inherit", "inherit", "inherit"];
 }
 
 var w = watch.exec(options.globs, options, program.args.join(" "));
