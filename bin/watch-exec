@@ -19,6 +19,7 @@ program
 	.option("-d, --debounce <ms>", "Exec cmd only after no events for N ms")
 	.option("-t, --throttle <ms>", "Exec cmd no more then once in N ms")
 	.option("-C, --no-combine-events", "Don't combine all events during debounce into single call")
+	.option("--run-on-start", "Run after starting the command, before any change events")
 	.option("--reglob <ms>", "Glob files every N ms to track added files/dirs")
 	.option("--check-md5", "Check md5 checksum of files and fire events only if checksum is changed")
 	.option("--no-check-mtime", "Don't check mtime of files and fire events only if mtime is changed")
@@ -50,7 +51,7 @@ program.on("--help", function(){
 	console.log("    For more info about glob syntax see: https://github.com/isaacs/node-glob");
 	console.log();
 	console.log("Examples:\n");
-	console.log("    $ watch-exec -g '*.js,test/*' -- './node_modules/.bin/mocha --colors test/test.js'");
+	console.log("    $ watch-exec -g '*.js,test/*' --run-on-start -- './node_modules/.bin/mocha --colors test/test.js'");
 	console.log("    $ watch-exec -g '**/*.js, !node_modules/' --debounce 5000 -- echo changed files: %relFiles");
 	console.log("    $ watch-exec -g '**/*.js, !node_modules/' -C -- echo event=%event relFile=%relFile");
 	console.log();
@@ -101,7 +102,7 @@ var options = {};
 	}
 });
 
-["combineEvents", "checkMd5", "checkMtime", "waitDone", "restartOnError", "shell", "silent", "debug"].forEach(function (opt) {
+["combineEvents", "runOnStart", "checkMd5", "checkMtime", "waitDone", "restartOnError", "shell", "silent", "debug"].forEach(function (opt) {
 	if (opt in program) {
 		options[opt] = program[opt];
 	}

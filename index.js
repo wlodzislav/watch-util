@@ -51,6 +51,7 @@ var execWatcherDefaults = {
 	reglob: 1000,
 	events: ["create", "change", "delete"],
 	combineEvents: true,
+	runOnStart: false,
 	checkMD5: false,
 	checkMtime: true,
 	deleteCheckInterval: 25,
@@ -98,7 +99,6 @@ watcher.exec = function (globs) {
 		options = arguments[1];
 		cmd = arguments[2];
 	}
-
 	if (options.debug && options.kill && !("debug" in options.kill)) {
 		options.kill.debug = true;
 	}
@@ -187,6 +187,10 @@ watcher.exec = function (globs) {
 		}
 		w.on("start", function () {
 			w._queueRunner.start();
+
+			if (options.runOnStart) {
+				w._queueRunner.push({ filePaths: ["."] });
+			}
 		});
 
 		var _stop = w.stop;

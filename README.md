@@ -323,6 +323,7 @@ Options:
 * `-d, --debounce <ms>` Exec cmd only after no events for N ms, default `50`
 * `-t, --throttle <ms>` Exec cmd no more then once in N ms, default `0`
 * `-C, --no-combine-events` Don't combine all events during debounce into single call
+* `--run-on-start"` Run after starting the command, before any change events
 * `--reglob <ms>` Glob files every N ms to track added files/dirs, default `1000`
 * `--check-md5` Check md5 checksum of files and fire events only if checksum is changed
 * `--no-check-mtime` Don't check mtime of files and fire events only if mtime is changed
